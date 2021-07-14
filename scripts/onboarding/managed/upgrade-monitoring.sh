@@ -19,14 +19,14 @@
 set -e
 set -o pipefail
 
-# released chart version for Azure Arc enabled Kubernetes public preview
-mcrChartVersion="2.8.3"
-mcr="mcr.microsoft.com"
-mcrChartRepoPath="azuremonitor/containerinsights/preview/azuremonitor-containers"
-
+# microsoft helm chart repo
+microsoftHelmRepo="https://microsoft.github.io/charts/repo"
+microsoftHelmRepoName="microsoft"
 # default to public cloud since only supported cloud is azure public clod
 defaultAzureCloud="AzureCloud"
-helmLocalRepoName="."
+# microsoft helm chart repo
+microsoftHelmRepo="https://microsoft.github.io/charts/repo"
+microsoftHelmRepoName="microsoft"
 helmChartName="azuremonitor-containers"
 
 # default release name used during onboarding
@@ -37,6 +37,9 @@ arcK8sResourceProvider="Microsoft.Kubernetes/connectedClusters"
 
 # default of resourceProvider is Azure Arc enabled Kubernetes and this will get updated based on the provider cluster resource
 resourceProvider="Microsoft.Kubernetes/connectedClusters"
+
+# resource provider for azure redhat openshift v4 cluster
+aroV4ResourceProvider="Microsoft.RedHatOpenShift/OpenShiftClusters"
 
 # Azure Arc enabled Kubernetes cluster resource
 isArcK8sCluster=false
@@ -235,10 +238,14 @@ upgrade_helm_chart_release() {
     adminUserName=$(az aro list-credentials -g $clusterResourceGroup -n $clusterName --query 'kubeadminUsername' -o tsv)
     adminPassword=$(az aro list-credentials -g $clusterResourceGroup -n $clusterName --query 'kubeadminPassword' -o tsv)
     apiServer=$(az aro show -g $clusterResourceGroup -n $clusterName --query apiserverProfile.url -o tsv)
+    # certain az cli versions adds /r/n so trim them
+    adminUserName=$(echo $adminUserName |tr -d '"\r\n')
+    adminPassword=$(echo $adminPassword |tr -d '"\r\n')
+    apiServer=$(echo $apiServer |tr -d '"\r\n')
     echo "login to the cluster via oc login"
     oc login $apiServer -u $adminUserName -p $adminPassword
-    echo "creating project azure-monitor-for-containers"
-    oc new-project $openshiftProjectName
+    echo "switching to project azure-monitor-for-containers"
+    oc project $openshiftProjectName
     echo "getting config-context of aro v4 cluster"
     kubeconfigContext=$(oc config current-context)
   fi
@@ -249,15 +256,7 @@ upgrade_helm_chart_release() {
     echo "installing Azure Monitor for containers HELM chart on to the cluster with kubecontext:${kubeconfigContext} ..."
   fi
 
-  export HELM_EXPERIMENTAL_OCI=1
-
-  echo "pull the chart from ${mcr}/${mcrChartRepoPath}:${mcrChartVersion}"
-  helm chart pull ${mcr}/${mcrChartRepoPath}:${mcrChartVersion}
-
-  echo "export the chart from local cache to current directory"
-  helm chart export ${mcr}/${mcrChartRepoPath}:${mcrChartVersion} --destination .
-
-  helmChartRepoPath=$helmLocalRepoName/$helmChartName
+  helmChartRepoPath=$microsoftHelmRepoName/$helmChartName
 
   echo "upgrading the release: $releaseName to chart version : ${mcrChartVersion}"
   helm get values $releaseName -o yaml | helm upgrade --install $releaseName $helmChartRepoPath -f -
@@ -296,6 +295,14 @@ validate_and_configure_supported_cloud() {
   fi
 }
 
+# add helm chart repo and update repo to get latest chart version
+add_and_update_helm_chart_repo() {
+  echo "adding helm repo: ${microsoftHelmRepoName} with repo path: ${microsoftHelmRepo}"
+  helm repo add ${microsoftHelmRepoName} ${microsoftHelmRepo}
+  echo "updating helm repo: ${microsoftHelmRepoName} to get local charts updated with latest ones"
+  helm repo update
+}
+
 # parse and validate args
 parse_args $@
 
@@ -321,6 +328,9 @@ fi
 
 # validate the cluster has monitoring tags
 validate_monitoring_tags
+
+# add helm repo & update to get the latest chart version
+add_and_update_helm_chart_repo
 
 # upgrade helm chart release
 upgrade_helm_chart_release

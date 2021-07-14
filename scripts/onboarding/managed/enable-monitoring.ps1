@@ -62,11 +62,10 @@ $isArcK8sCluster = $false
 $isAksCluster = $false
 $isUsingServicePrincipal = $false
 
-# released chart version in mcr
-$mcr = "mcr.microsoft.com"
-$mcrChartVersion = "2.8.3"
-$mcrChartRepoPath = "azuremonitor/containerinsights/preview/azuremonitor-containers"
-$helmLocalRepoName = "."
+# microsoft helm chart repo
+$microsoftHelmRepo="https://microsoft.github.io/charts/repo"
+$microsoftHelmRepoName="microsoft"
+
 $omsAgentDomainName="opinsights.azure.com"
 
 if ([string]::IsNullOrEmpty($azureCloudName) -eq $true) {
@@ -547,16 +546,12 @@ Write-Host "Helm version" : $helmVersion
 Write-Host("Installing or upgrading if exists, Azure Monitor for containers HELM chart ...")
 try {
 
-     Write-Host("pull the chart from mcr.microsoft.com")
-    [System.Environment]::SetEnvironmentVariable("HELM_EXPERIMENTAL_OCI", 1, "Process")
+    Write-Host("Add helm chart repo- ${microsoftHelmRepoName} with repo path: ${microsoftHelmRepo}")
+    helm repo add ${microsoftHelmRepoName} ${microsoftHelmRepo}
+    Write-Host("Updating the helm chart repo- ${microsoftHelmRepoName} to get latest chart versions")
+    helm repo update ${microsoftHelmRepoName}
 
-    Write-Host("pull the chart from mcr.microsoft.com")
-    helm chart pull ${mcr}/${mcrChartRepoPath}:${mcrChartVersion}
-
-    Write-Host("export the chart from local cache to current directory")
-    helm chart export ${mcr}/${mcrChartRepoPath}:${mcrChartVersion} --destination .
-
-    $helmChartRepoPath = "${helmLocalRepoName}" + "/" + "${helmChartName}"
+    $helmChartRepoPath = "${microsoftHelmRepoName}" + "/" + "${helmChartName}"
 
     Write-Host("helmChartRepoPath is : ${helmChartRepoPath}")
 

@@ -43,11 +43,9 @@ defaultAzureCloud="AzureCloud"
 # default domain will be for public cloud
 omsAgentDomainName="opinsights.azure.com"
 
-# released chart version in mcr
-mcrChartVersion="2.8.3"
-mcr="mcr.microsoft.com"
-mcrChartRepoPath="azuremonitor/containerinsights/preview/azuremonitor-containers"
-helmLocalRepoName="."
+# microsoft helm chart repo
+microsoftHelmRepo="https://microsoft.github.io/charts/repo"
+microsoftHelmRepoName="microsoft"
 helmChartName="azuremonitor-containers"
 
 # default release name used during onboarding
@@ -435,9 +433,10 @@ create_default_log_analytics_workspace() {
 
   workspaceResourceGroup="DefaultResourceGroup-"$workspaceRegionCode
   isRGExists=$(az group exists -g $workspaceResourceGroup)
+  isRGExists=$(echo $isRGExists | tr -d '"\r\n')
   workspaceName="DefaultWorkspace-"$subscriptionId"-"$workspaceRegionCode
 
-  if $isRGExists; then
+  if [ "${isRGExists}" == "true" ]; then
     echo "using existing default resource group:"$workspaceResourceGroup
   else
     echo "creating resource group: $workspaceResourceGroup in region: $workspaceRegion"
@@ -455,7 +454,7 @@ create_default_log_analytics_workspace() {
   fi
 
   workspaceResourceId=$(az resource show -g $workspaceResourceGroup -n $workspaceName --resource-type $workspaceResourceProvider --query id -o json)
-  workspaceResourceId=$(echo $workspaceResourceId | tr -d '"')
+  workspaceResourceId=$(echo $workspaceResourceId | tr -d '"' |  tr -d '"\r\n')
   echo "workspace resource Id: ${workspaceResourceId}"
 }
 
@@ -495,10 +494,16 @@ install_helm_chart() {
     adminUserName=$(az aro list-credentials -g $clusterResourceGroup -n $clusterName --query 'kubeadminUsername' -o tsv)
     adminPassword=$(az aro list-credentials -g $clusterResourceGroup -n $clusterName --query 'kubeadminPassword' -o tsv)
     apiServer=$(az aro show -g $clusterResourceGroup -n $clusterName --query apiserverProfile.url -o tsv)
+    # certain az cli versions adds /r/n so trim them
+    adminUserName=$(echo $adminUserName | tr -d '"\r\n')
+    adminPassword=$(echo $adminPassword | tr -d '"\r\n')
+    apiServer=$(echo $apiServer | tr -d '"\r\n')
     echo "login to the cluster via oc login"
     oc login $apiServer -u $adminUserName -p $adminPassword
-    echo "creating project azure-monitor-for-containers"
+    echo "creating project: azure-monitor-for-containers"
     oc new-project $openshiftProjectName
+    echo "swicthing to project: azure-monitor-for-containers"
+    oc project $openshiftProjectName
     echo "getting config-context of aro v4 cluster"
     kubeconfigContext=$(oc config current-context)
   fi
@@ -513,15 +518,7 @@ install_helm_chart() {
   clusterRegion=$(az resource show --ids ${clusterResourceId} --query location -o tsv)
   echo "cluster region is : ${clusterRegion}"
 
-  echo "pull the chart version ${mcrChartVersion} from ${mcr}/${mcrChartRepoPath}"
-  export HELM_EXPERIMENTAL_OCI=1
-  helm chart pull $mcr/$mcrChartRepoPath:$mcrChartVersion
-
-  echo "export the chart from local cache to current directory"
-  helm chart export $mcr/$mcrChartRepoPath:$mcrChartVersion --destination .
-
-  helmChartRepoPath=$helmLocalRepoName/$helmChartName
-
+  helmChartRepoPath=$microsoftHelmRepoName/$helmChartName
   echo "helm chart repo path: ${helmChartRepoPath}"
 
   if [ ! -z "$proxyEndpoint" ]; then
@@ -579,6 +576,14 @@ enable_aks_monitoring_addon() {
   echo $clusterGetResponse | jq $jqquery >putrequestbody.json
   status=$(az rest --method put --uri $clusterResourceId?api-version=2020-03-01 --body @putrequestbody.json --headers Content-Type=application/json)
   echo "status after enabling of aks monitoringa addon:$status"
+}
+
+# add helm chart repo and update repo to get latest chart version
+add_and_update_helm_chart_repo() {
+  echo "adding helm repo: ${microsoftHelmRepoName} with repo path: ${microsoftHelmRepo}"
+  helm repo add ${microsoftHelmRepoName} ${microsoftHelmRepo}
+  echo "updating helm repo: ${microsoftHelmRepoName} to get local charts updated with latest ones"
+  helm repo update
 }
 
 # parse and validate args
@@ -643,6 +648,9 @@ if [ "$isAksCluster" = true ]; then
 else
   attach_monitoring_tags
 fi
+
+# add helm repo & update to get the latest chart version
+add_and_update_helm_chart_repo
 
 # install helm chart
 install_helm_chart
