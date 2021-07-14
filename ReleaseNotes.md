@@ -11,21 +11,28 @@ additional questions or comments.
 
 Note : The agent version(s) below has dates (ciprod<mmddyyyy>), which indicate the agent build dates (not release dates)
 
+### 07/02/2021 -
+##### Version microsoft/oms:ciprod06112021-1 Version mcr.microsoft.com/azuremonitor/containerinsights/ciprod:ciprod06112021-1 (linux)
+##### Version microsoft/oms:win-ciprod06112021 Version mcr.microsoft.com/azuremonitor/containerinsights/ciprod:win-ciprod06112021 (windows)
+##### Code change log
+- Hotfix for crash (which triggered when scaling down of windows nodes) in clean_cache method in in_kube_node_inventory plugin
+- We didn't rebuild windows container, so the image version for windows container stays the same as last release (ciprod:win-ciprod06112021) before this hotfix
+
 ### 06/11/2021 -
 ##### Version microsoft/oms:ciprod06112021 Version mcr.microsoft.com/azuremonitor/containerinsights/ciprod:ciprod06112021 (linux)
 ##### Version microsoft/oms:win-ciprod06112021 Version mcr.microsoft.com/azuremonitor/containerinsights/ciprod:win-ciprod06112021 (windows)
  - Linux Agent
-   - Removal of base omsagent dependency 
+   - Removal of base omsagent dependency
    - Using MDSD version 1.10.1  as base agent for all the supported LA data types
    - Ruby version upgrade to 2.6 i.e. same version as windows agent
-   - Upgrade FluentD gem version to 1.12.2 
+   - Upgrade FluentD gem version to 1.12.2
    - All the Ruby Fluentd Plugins upgraded to v1 as per Fluentd guidance
    - Fluent-bit tail plugin Mem_Buf_limit is configurable via ConfigMap
  - Windows Agent
    - CA cert changes for airgapped clouds
    - Send perf metrics to MDM from windows daemonset
    - FluentD gem version upgrade from 1.10.2 to 1.12.2 to make same version as Linux Agent
-  - Doc updates 
+  - Doc updates
    - README updates related to OSM preview release for Arc K8s
    - README updates related to recommended alerts
 
@@ -63,7 +70,7 @@ Note : The agent version(s) below has dates (ciprod<mmddyyyy>), which indicate t
 ##### Version microsoft/oms:ciprod03262021 Version mcr.microsoft.com/azuremonitor/containerinsights/ciprod:ciprod03262021 (linux)
 ##### Version microsoft/oms:win-ciprod03262021 Version mcr.microsoft.com/azuremonitor/containerinsights/ciprod:win-ciprod03262021 (windows)
 ##### Code change log
-- Started collecting new metric - kubelet running pods count  
+- Started collecting new metric - kubelet running pods count
 - Onboarding script fixes to add explicit json output
 - Proxy and token updates for ARC
 - Doc updates for Microsoft charts repo release
@@ -94,13 +101,13 @@ Note : The agent version(s) below has dates (ciprod<mmddyyyy>), which indicate t
 ##### Version microsoft/oms:win-ciprod01112021 Version mcr.microsoft.com/azuremonitor/containerinsights/ciprod:win-ciprod01112021 (windows)
 ##### Code change log
 - Fixes for Linux Agent Replicaset Pod OOMing issue
-- Update fluentbit (1.14.2 to 1.6.8) for the Linux Daemonset 
+- Update fluentbit (1.14.2 to 1.6.8) for the Linux Daemonset
 - Make Fluentbit settings: log_flush_interval_secs, tail_buf_chunksize_megabytes and tail_buf_maxsize_megabytes configurable via configmap
 - Support for PV inventory collection
 - Removal of Custom metric region check for Public cloud regions and update to use cloud environment variable to determine the custom metric support
 - For daemonset pods, add the dnsconfig to use ndots: 3 from ndots:5 to optimize the number of DNS API calls made
 - Fix for inconsistency in the collection container environment variables for the pods which has high number of containers
-- Fix for disabling of std{out;err} log_collection_settings via configmap issue in windows daemonset 
+- Fix for disabling of std{out;err} log_collection_settings via configmap issue in windows daemonset
 - Update to use workspace key from mount file rather than environment variable for windows daemonset agent
 - Remove per container info logs in the container inventory
 - Enable ADX route for windows container logs
