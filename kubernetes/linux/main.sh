@@ -38,6 +38,68 @@ waitforlisteneronTCPport() {
       fi
 }
 
+#Setting environment variable for CAdvisor metrics to use port 10255/10250 based on curl request
+echo "Making wget request to cadvisor endpoint with port 10250"
+#Defaults to use port 10255
+cAdvisorIsSecure=false
+RET_CODE=`wget --server-response https://$NODE_IP:10250/stats/summary --no-check-certificate --header="Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" 2>&1 | awk '/^  HTTP/{print $2}'`
+if [ $RET_CODE -eq 200 ]; then
+      cAdvisorIsSecure=true
+fi
+
+# default to docker since this is default in AKS as of now and change to containerd once this becomes default in AKS
+export CONTAINER_RUNTIME="docker"
+export NODE_NAME=""
+
+if [ "$cAdvisorIsSecure" = true ]; then
+      echo "Wget request using port 10250 succeeded. Using 10250"
+      export IS_SECURE_CADVISOR_PORT=true
+      echo "export IS_SECURE_CADVISOR_PORT=true" >> ~/.bashrc
+      export CADVISOR_METRICS_URL="https://$NODE_IP:10250/metrics"
+      echo "export CADVISOR_METRICS_URL=https://$NODE_IP:10250/metrics" >> ~/.bashrc
+      echo "Making curl request to cadvisor endpoint /pods with port 10250 to get the configured container runtime on kubelet"
+      podWithValidContainerId=$(curl -s -k -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" https://$NODE_IP:10250/pods | jq -R 'fromjson? | [ .items[] | select( any(.status.phase; contains("Running")) ) ] | .[0]')
+else
+      echo "Wget request using port 10250 failed. Using port 10255"
+      export IS_SECURE_CADVISOR_PORT=false
+      echo "export IS_SECURE_CADVISOR_PORT=false" >> ~/.bashrc
+      export CADVISOR_METRICS_URL="http://$NODE_IP:10255/metrics"
+      echo "export CADVISOR_METRICS_URL=http://$NODE_IP:10255/metrics" >> ~/.bashrc
+      echo "Making curl request to cadvisor endpoint with port 10255 to get the configured container runtime on kubelet"
+      podWithValidContainerId=$(curl -s http://$NODE_IP:10255/pods | jq -R 'fromjson? | [ .items[] | select( any(.status.phase; contains("Running")) ) ] | .[0]')
+fi
+
+if [ ! -z "$podWithValidContainerId" ]; then
+      containerRuntime=$(echo $podWithValidContainerId | jq -r '.status.containerStatuses[0].containerID' | cut -d ':' -f 1)
+      nodeName=$(echo $podWithValidContainerId | jq -r '.spec.nodeName')
+      # convert to lower case so that everywhere else can be used in lowercase
+      containerRuntime=$(echo $containerRuntime | tr "[:upper:]" "[:lower:]")
+      nodeName=$(echo $nodeName | tr "[:upper:]" "[:lower:]")
+      # update runtime only if its not empty, not null and not startswith docker
+      if [ -z "$containerRuntime" -o "$containerRuntime" == null  ]; then
+            echo "using default container runtime as $CONTAINER_RUNTIME since got containeRuntime as empty or null"
+      elif [[ $containerRuntime != docker* ]]; then
+            export CONTAINER_RUNTIME=$containerRuntime
+      fi
+
+      if [ -z "$nodeName" -o "$nodeName" == null  ]; then
+            echo "-e error nodeName in /pods API response is empty"
+      else
+            export NODE_NAME=$nodeName
+      fi
+else
+      echo "-e error either /pods API request failed or no running pods"
+fi
+
+echo "configured container runtime on kubelet is : "$CONTAINER_RUNTIME
+echo "export CONTAINER_RUNTIME="$CONTAINER_RUNTIME >> ~/.bashrc
+
+
+
+
+#Using the get_hostname for hostname instead of the host field in syslog messages
+sed -i.bak "s/record\[\"Host\"\] = hostname/record\[\"Host\"\] = OMS::Common.get_hostname/" /opt/microsoft/omsagent/plugin/filter_syslog.rb
+
 #using /var/opt/microsoft/docker-cimprov/state instead of /var/opt/microsoft/omsagent/state since the latter gets deleted during onboarding
 mkdir -p /var/opt/microsoft/docker-cimprov/state
 
@@ -362,52 +424,6 @@ if [ $RET_CODE -eq 200 ]; then
       cAdvisorIsSecure=true
 fi
 
-# default to docker since this is default in AKS as of now and change to containerd once this becomes default in AKS
-export CONTAINER_RUNTIME="docker"
-export NODE_NAME=""
-
-if [ "$cAdvisorIsSecure" = true ]; then
-      echo "Wget request using port 10250 succeeded. Using 10250"
-      export IS_SECURE_CADVISOR_PORT=true
-      echo "export IS_SECURE_CADVISOR_PORT=true" >> ~/.bashrc
-      export CADVISOR_METRICS_URL="https://$NODE_IP:10250/metrics"
-      echo "export CADVISOR_METRICS_URL=https://$NODE_IP:10250/metrics" >> ~/.bashrc
-      echo "Making curl request to cadvisor endpoint /pods with port 10250 to get the configured container runtime on kubelet"
-      podWithValidContainerId=$(curl -s -k -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" https://$NODE_IP:10250/pods | jq -R 'fromjson? | [ .items[] | select( any(.status.phase; contains("Running")) ) ] | .[0]')
-else
-      echo "Wget request using port 10250 failed. Using port 10255"
-      export IS_SECURE_CADVISOR_PORT=false
-      echo "export IS_SECURE_CADVISOR_PORT=false" >> ~/.bashrc
-      export CADVISOR_METRICS_URL="http://$NODE_IP:10255/metrics"
-      echo "export CADVISOR_METRICS_URL=http://$NODE_IP:10255/metrics" >> ~/.bashrc
-      echo "Making curl request to cadvisor endpoint with port 10255 to get the configured container runtime on kubelet"
-      podWithValidContainerId=$(curl -s http://$NODE_IP:10255/pods | jq -R 'fromjson? | [ .items[] | select( any(.status.phase; contains("Running")) ) ] | .[0]')
-fi
-
-if [ ! -z "$podWithValidContainerId" ]; then
-      containerRuntime=$(echo $podWithValidContainerId | jq -r '.status.containerStatuses[0].containerID' | cut -d ':' -f 1)
-      nodeName=$(echo $podWithValidContainerId | jq -r '.spec.nodeName')
-      # convert to lower case so that everywhere else can be used in lowercase
-      containerRuntime=$(echo $containerRuntime | tr "[:upper:]" "[:lower:]")
-      nodeName=$(echo $nodeName | tr "[:upper:]" "[:lower:]")
-      # update runtime only if its not empty, not null and not startswith docker
-      if [ -z "$containerRuntime" -o "$containerRuntime" == null  ]; then
-            echo "using default container runtime as $CONTAINER_RUNTIME since got containeRuntime as empty or null"
-      elif [[ $containerRuntime != docker* ]]; then
-            export CONTAINER_RUNTIME=$containerRuntime
-      fi
-
-      if [ -z "$nodeName" -o "$nodeName" == null  ]; then
-            echo "-e error nodeName in /pods API response is empty"
-      else
-            export NODE_NAME=$nodeName
-      fi
-else
-      echo "-e error either /pods API request failed or no running pods"
-fi
-
-echo "configured container runtime on kubelet is : "$CONTAINER_RUNTIME
-echo "export CONTAINER_RUNTIME="$CONTAINER_RUNTIME >> ~/.bashrc
 
 export KUBELET_RUNTIME_OPERATIONS_TOTAL_METRIC="kubelet_runtime_operations_total"
 echo "export KUBELET_RUNTIME_OPERATIONS_TOTAL_METRIC="$KUBELET_RUNTIME_OPERATIONS_TOTAL_METRIC >> ~/.bashrc

@@ -26,6 +26,7 @@ class CAdvisorMetricsAPIClient
   @clusterAgentSchemaVersion = ENV["AZMON_AGENT_CFG_SCHEMA_VERSION"]
   @clusterContainerLogEnrich = ENV["AZMON_CLUSTER_CONTAINER_LOG_ENRICH"]
   @clusterContainerLogSchemaVersion = ENV["AZMON_CONTAINER_LOG_SCHEMA_VERSION"]
+  @clusterMultilineEnabled = ENV["AZMON_LOG_STITCH_MULTILINE"]
 
   @dsPromInterval = ENV["TELEMETRY_DS_PROM_INTERVAL"]
   @dsPromFieldPassCount = ENV["TELEMETRY_DS_PROM_FIELDPASS_LENGTH"]
@@ -291,6 +292,9 @@ class CAdvisorMetricsAPIClient
                     #telemetry for Container log schema version clusterContainerLogSchemaVersion
                     if (!@clusterContainerLogSchemaVersion.nil? && !@clusterContainerLogSchemaVersion.empty?)
                       telemetryProps["containerLogVer"] = @clusterContainerLogSchemaVersion
+                    end
+                    if (!@clusterMultilineEnabled.nil? && !@clusterMultilineEnabled.empty?)
+                      telemetryProps["multilineEnabled"] = @clusterMultilineEnabled
                     end
                     ApplicationInsightsUtility.sendMetricTelemetry(metricNametoReturn, metricValue, telemetryProps)
                   end

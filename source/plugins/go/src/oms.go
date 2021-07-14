@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"regexp"
 
 	"github.com/fluent/fluent-bit-go/output"
 	"github.com/google/uuid"
@@ -215,6 +216,9 @@ var (
 	agentName            = "ContainerAgent"
 	userAgent            = ""
 )
+
+var stripMultilineHeaders bool = false;
+var multilineContainerdRegex = regexp.MustCompile(`\n\d+-\d+\d+-\d+T\d+:\d+:\d+.\d+Z ((stdout)|(stderr)) [FP] `);
 
 // DataItemLAv1 == ContainerLog table in LA
 type DataItemLAv1 struct {
@@ -1049,6 +1053,25 @@ func PostDataHelper(tailPluginRecords []map[interface{}]interface{}) int {
 	for _, record := range tailPluginRecords {
 		containerID, k8sNamespace, k8sPodName, containerName := GetContainerIDK8sNamespacePodNameFromFileName(ToString(record["filepath"]))
 		logEntrySource := ToString(record["stream"])
+		logEntry := ToString(record["log"])
+		logEntryTimeStamp := ToString(record["time"])
+
+		if (stripMultilineHeaders) {
+			logEntry = multilineContainerdRegex.ReplaceAllString(logEntry, "\n")
+
+			// If there's a single line log when multiline is enabled, it won't be parsed by the parser
+			// and the whole line with the containerd header will be the log entry.
+			// Parse the timestamp, source, and log entry, so the log isn't dropped in the LA pipeline.
+			if len(logEntryTimeStamp) == 0 {
+				var containerdHeaderRegex = regexp.MustCompile(`^([^ ]+) (stdout|stderr) ([^ ]*) ( *(.*))$`)
+				groupMatches := containerdHeaderRegex.FindStringSubmatch(logEntry)
+				if len(groupMatches) > 4 {
+					logEntryTimeStamp = groupMatches[1]
+					logEntrySource = groupMatches[2]
+					logEntry = groupMatches[4]
+				}
+			}
+		}
 
 		if strings.EqualFold(logEntrySource, "stdout") {
 			if containerID == "" || containsKey(StdoutIgnoreNsSet, k8sNamespace) {
@@ -1063,10 +1086,8 @@ func PostDataHelper(tailPluginRecords []map[interface{}]interface{}) int {
 		stringMap = make(map[string]string)
 		//below id & name are used by latency telemetry in both v1 & v2 LA schemas
 		id := ""
-	    name := ""
+		name := ""
 
-		logEntry := ToString(record["log"])
-		logEntryTimeStamp := ToString(record["time"])
 		//ADX Schema & LAv2 schema are almost the same (except resourceId)
 		if (ContainerLogSchemaV2 == true || ContainerLogsRouteADX == true) {
 			stringMap["Computer"] = Computer
@@ -1713,4 +1734,11 @@ func InitializePlugin(pluginConfPath string, agentVersion string) {
 
 	MdsdInsightsMetricsTagName = MdsdInsightsMetricsSourceName
     MdsdKubeMonAgentEventsTagName = MdsdKubeMonAgentEventsSourceName		
+
+	// If stitching multiline log messages and using containerd, then strip out the containerd header since it
+	// won't be parsed except for the start of a multiline log.
+	if (os.Getenv("AZMON_LOG_STITCH_MULTILINE") == "true" && os.Getenv("CONTAINER_RUNTIME") == "containerd") {
+		stripMultilineHeaders = true
+	}
 }
+

@@ -18,6 +18,8 @@ def substituteFluentBitPlaceHolders
     interval = ENV["FBIT_SERVICE_FLUSH_INTERVAL"]
     bufferChunkSize = ENV["FBIT_TAIL_BUFFER_CHUNK_SIZE"]
     bufferMaxSize = ENV["FBIT_TAIL_BUFFER_MAX_SIZE"]
+    multilineLogging = ENV["AZMON_LOG_STITCH_MULTILINE"]
+    containerRuntime = ENV["CONTAINER_RUNTIME"]
     memBufLimit = ENV["FBIT_TAIL_MEM_BUF_LIMIT"]
 
     serviceInterval = (!interval.nil? && is_number?(interval) && interval.to_i > 0 ) ? interval : @default_service_interval
@@ -47,6 +49,15 @@ def substituteFluentBitPlaceHolders
       new_contents = new_contents.gsub("${TAIL_BUFFER_MAX_SIZE}", "Buffer_Max_Size " + tailBufferMaxSize + "m")
     else
       new_contents = new_contents.gsub("\n    ${TAIL_BUFFER_MAX_SIZE}\n", "\n")
+    end
+
+    # Docker Mode vs. Multiline for Fluent-Bit depending on container runtime, if multiline is enabled
+    if !multilineLogging.nil? && multilineLogging.to_s.downcase == "true" && !containerRuntime.nil?
+      if containerRuntime == "docker"
+        new_contents = new_contents.gsub("#${DOCKER_MULTILINE_LOGGING}", "")
+      else
+        new_contents = new_contents.gsub("#${CONTAINTERD_MULTILINE_LOGGING}", "")
+      end
     end
 
     File.open(@td_agent_bit_conf_path, "w") { |file| file.puts new_contents }

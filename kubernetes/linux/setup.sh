@@ -41,7 +41,7 @@ chmod 777 /opt/telegraf
 wget -qO - https://packages.fluentbit.io/fluentbit.key | sudo apt-key add -
 sudo echo "deb https://packages.fluentbit.io/ubuntu/xenial xenial main" >> /etc/apt/sources.list
 sudo apt-get update
-sudo apt-get install td-agent-bit=1.6.8 -y
+sudo apt-get install td-agent-bit=1.7.8 -y
 
 # install ruby2.6
 sudo apt-get install software-properties-common -y
@@ -52,7 +52,6 @@ sudo apt-get install ruby2.6 ruby2.6-dev gcc make -y
 gem install fluentd -v "1.12.2" --no-document
 fluentd --setup ./fluent
 gem install gyoku iso8601 --no-doc
-
 
 rm -f $TMPDIR/docker-cimprov*.sh
 rm -f $TMPDIR/azure-mdsd*.deb

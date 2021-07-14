@@ -352,12 +352,26 @@ function Get-ContainerRuntime {
 }
 
 function Start-Fluent-Telegraf {
-
-    # Run fluent-bit service first so that we do not miss any logs being forwarded by the fluentd service and telegraf service.
-    # Run fluent-bit as a background job. Switch this to a windows service once fluent-bit supports natively running as a windows service
-    Start-Job -ScriptBlock { Start-Process -NoNewWindow -FilePath "C:\opt\fluent-bit\bin\fluent-bit.exe" -ArgumentList @("-c", "C:\etc\fluent-bit\fluent-bit.conf", "-e", "C:\opt\omsagentwindows\out_oms.so") }
-
     $containerRuntime = Get-ContainerRuntime
+    $stitchMultilineLogs = [System.Environment]::GetEnvironmentVariable("AZMON_LOG_STITCH_MULTILINE", "process")
+
+    if (![string]::IsNullOrEmpty($stitchMultilineLogs) -and [string]$stitchMultilineLogs -eq "true") {
+      if (![string]::IsNullOrEmpty($containerRuntime) -and [string]$containerRuntime.StartsWith('docker') -eq $false) {
+        Write-Host "For fluent-bit, changing parser from Docker multiline to CRI multiline since container runtime : $($containerRuntime) and which is non-docker"
+        (Get-Content -Path C:/etc/fluent-bit/fluent-bit-multiline.conf -Raw)  -replace '#{CONTAINTERD_MULTILINE_LOGGING}','' | Set-Content C:\etc\fluent-bit\fluent-bit-multiline.conf
+      } else {
+        Write-Host "For fluent-bit setting multiline parser as Docker"
+        (Get-Content -Path C:/etc/fluent-bit/fluent-bit-multiline.conf -Raw)  -replace '#{DOCKER_MULTILINE_LOGGING}','' | Set-Content C:\etc\fluent-bit\fluent-bit-multiline.conf
+      }
+      # Run fluent-bit service first so that we do not miss any logs being forwarded by the fluentd service and telegraf service.
+      # Run fluent-bit as a background job. Switch this to a windows service once fluent-bit supports natively running as a windows service
+      Write-Host "Starting fluent-bit multiline"
+      Start-Job -ScriptBlock { Start-Process -NoNewWindow -FilePath "C:\opt\fluent-bit\bin\fluent-bit.exe" -ArgumentList @("-c", "C:\etc\fluent-bit\fluent-bit-multiline.conf", "-e", "C:\opt\omsagentwindows\out_oms.so") }
+    } else {
+      # Run fluent-bit service first so that we do not miss any logs being forwarded by the fluentd service and telegraf service.
+      # Run fluent-bit as a background job. Switch this to a windows service once fluent-bit supports natively running as a windows service
+      Start-Job -ScriptBlock { Start-Process -NoNewWindow -FilePath "C:\opt\fluent-bit\bin\fluent-bit.exe" -ArgumentList @("-c", "C:\etc\fluent-bit\fluent-bit.conf", "-e", "C:\opt\omsagentwindows\out_oms.so") }
+    }
 
     #register fluentd as a service and start
     # there is a known issues with win32-service https://github.com/chef/win32-service/issues/70
@@ -365,6 +379,7 @@ function Start-Fluent-Telegraf {
         # change parser from docker to cri if the container runtime is not docker
         Write-Host "changing parser from Docker to CRI since container runtime : $($containerRuntime) and which is non-docker"
         (Get-Content -Path C:/etc/fluent/fluent.conf -Raw)  -replace 'fluent-docker-parser.conf','fluent-cri-parser.conf' | Set-Content C:/etc/fluent/fluent.conf
+        (Get-Content -Path C:/etc/fluent/fluent-multiline.conf -Raw)  -replace 'fluent-docker-parser.conf','fluent-cri-parser.conf' | Set-Content C:/etc/fluent/fluent-multiline.conf
     }
 
     # Start telegraf only in sidecar scraping mode
@@ -375,8 +390,12 @@ function Start-Fluent-Telegraf {
         Start-Telegraf
     }
 
-    fluentd --reg-winsvc i --reg-winsvc-auto-start --winsvc-name fluentdwinaks --reg-winsvc-fluentdopt '-c C:/etc/fluent/fluent.conf -o C:/etc/fluent/fluent.log'
-
+    if (![string]::IsNullOrEmpty($stitchMultilineLogs) -and [string]$stitchMultilineLogs -eq "true") {
+      Write-Host "starting fluentd multiline"
+      fluentd --reg-winsvc i --reg-winsvc-auto-start --winsvc-name fluentdwinaks --reg-winsvc-fluentdopt '-c C:/etc/fluent/fluent-multiline.conf -o C:/etc/fluent/fluent.log'
+    } else {
+      fluentd --reg-winsvc i --reg-winsvc-auto-start --winsvc-name fluentdwinaks --reg-winsvc-fluentdopt '-c C:/etc/fluent/fluent.conf -o C:/etc/fluent/fluent.log'
+    }
     Notepad.exe | Out-Null
 }
 

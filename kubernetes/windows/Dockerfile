@@ -57,11 +57,14 @@ COPY ./omsagentwindows/out_oms.so /opt/omsagentwindows/out_oms.so
 
 # copy fluent, fluent-bit and out_oms conf files
 COPY ./omsagentwindows/installer/conf/fluent.conf /etc/fluent/
+COPY ./omsagentwindows/installer/conf/fluent-multiline.conf /etc/fluent/
 # copy fluent docker and cri parser conf files
 COPY ./omsagentwindows/installer/conf/fluent-cri-parser.conf /etc/fluent/
 COPY ./omsagentwindows/installer/conf/fluent-docker-parser.conf /etc/fluent/
 COPY ./omsagentwindows/installer/conf/fluent-bit.conf /etc/fluent-bit
+COPY ./omsagentwindows/installer/conf/fluent-bit-multiline.conf /etc/fluent-bit
 COPY ./omsagentwindows/installer/conf/out_oms.conf /etc/omsagentwindows
+COPY ./omsagentwindows/installer/conf/azm-containers-parser.conf /etc/fluent-bit
 
 # copy telegraf conf file
 COPY ./omsagentwindows/installer/conf/telegraf.conf /etc/telegraf/
