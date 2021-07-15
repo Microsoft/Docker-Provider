@@ -280,48 +280,54 @@ module Fluent::Plugin
           timeDifference = (DateTime.now.to_time.to_i - @@nodeTelemetryTimeTracker).abs
           timeDifferenceInMinutes = timeDifference / 60
           if (timeDifferenceInMinutes >= Constants::TELEMETRY_FLUSH_INTERVAL_IN_MINUTES)
-            properties = getNodeTelemetryProps(item)
-            properties["KubernetesProviderID"] = nodeInventoryRecord["KubernetesProviderID"]
-            capacityInfo = item["status"]["capacity"]
-
-            ApplicationInsightsUtility.sendMetricTelemetry("NodeMemory", capacityInfo["memory"], properties)
             begin
-              if (!capacityInfo["nvidia.com/gpu"].nil?) && (!capacityInfo["nvidia.com/gpu"].empty?)
-                properties["nvigpus"] = capacityInfo["nvidia.com/gpu"]
+              properties = getNodeTelemetryProps(item)
+              properties["KubernetesProviderID"] = nodeInventoryRecord["KubernetesProviderID"]
+              capacityInfo = item["status"]["capacity"]
+
+              ApplicationInsightsUtility.sendMetricTelemetry("NodeMemory", capacityInfo["memory"], properties)
+              begin
+                if (!capacityInfo["nvidia.com/gpu"].nil?) && (!capacityInfo["nvidia.com/gpu"].empty?)
+                  properties["nvigpus"] = capacityInfo["nvidia.com/gpu"]
+                end
+
+                if (!capacityInfo["amd.com/gpu"].nil?) && (!capacityInfo["amd.com/gpu"].empty?)
+                  properties["amdgpus"] = capacityInfo["amd.com/gpu"]
+                end
+              rescue => errorStr
+                $log.warn "Failed in getting GPU telemetry in_kube_nodes : #{errorStr}"
+                $log.debug_backtrace(errorStr.backtrace)
+                ApplicationInsightsUtility.sendExceptionTelemetry(errorStr)
               end
 
-              if (!capacityInfo["amd.com/gpu"].nil?) && (!capacityInfo["amd.com/gpu"].empty?)
-                properties["amdgpus"] = capacityInfo["amd.com/gpu"]
+              # Telemetry for data collection config for replicaset
+              if (File.file?(@@configMapMountPath))
+                properties["collectAllKubeEvents"] = @@collectAllKubeEvents
               end
+
+              #telemetry about prometheus metric collections settings for replicaset
+              if (File.file?(@@promConfigMountPath))
+                properties["rsPromInt"] = @@rsPromInterval
+                properties["rsPromFPC"] = @@rsPromFieldPassCount
+                properties["rsPromFDC"] = @@rsPromFieldDropCount
+                properties["rsPromServ"] = @@rsPromK8sServiceCount
+                properties["rsPromUrl"] = @@rsPromUrlCount
+                properties["rsPromMonPods"] = @@rsPromMonitorPods
+                properties["rsPromMonPodsNs"] = @@rsPromMonitorPodsNamespaceLength
+                properties["rsPromMonPodsLabelSelectorLength"] = @@rsPromMonitorPodsLabelSelectorLength
+                properties["rsPromMonPodsFieldSelectorLength"] = @@rsPromMonitorPodsFieldSelectorLength
+              end
+              # telemetry about osm metric settings for replicaset
+              if (File.file?(@@osmConfigMountPath))
+                properties["osmNamespaceCount"] = @@osmNamespaceCount
+              end
+              ApplicationInsightsUtility.sendMetricTelemetry("NodeCoreCapacity", capacityInfo["cpu"], properties)
+              telemetrySent = true
             rescue => errorStr
-              $log.warn "Failed in getting GPU telemetry in_kube_nodes : #{errorStr}"
+              $log.warn "Failed in getting telemetry in_kube_nodes : #{errorStr}"
               $log.debug_backtrace(errorStr.backtrace)
               ApplicationInsightsUtility.sendExceptionTelemetry(errorStr)
             end
-
-            # Telemetry for data collection config for replicaset
-            if (File.file?(@@configMapMountPath))
-              properties["collectAllKubeEvents"] = @@collectAllKubeEvents
-            end
-
-            #telemetry about prometheus metric collections settings for replicaset
-            if (File.file?(@@promConfigMountPath))
-              properties["rsPromInt"] = @@rsPromInterval
-              properties["rsPromFPC"] = @@rsPromFieldPassCount
-              properties["rsPromFDC"] = @@rsPromFieldDropCount
-              properties["rsPromServ"] = @@rsPromK8sServiceCount
-              properties["rsPromUrl"] = @@rsPromUrlCount
-              properties["rsPromMonPods"] = @@rsPromMonitorPods
-              properties["rsPromMonPodsNs"] = @@rsPromMonitorPodsNamespaceLength
-              properties["rsPromMonPodsLabelSelectorLength"] = @@rsPromMonitorPodsLabelSelectorLength
-              properties["rsPromMonPodsFieldSelectorLength"] = @@rsPromMonitorPodsFieldSelectorLength
-            end
-            # telemetry about osm metric settings for replicaset
-            if (File.file?(@@osmConfigMountPath))
-              properties["osmNamespaceCount"] = @@osmNamespaceCount
-            end
-            ApplicationInsightsUtility.sendMetricTelemetry("NodeCoreCapacity", capacityInfo["cpu"], properties)
-            telemetrySent = true
           end
         end
         if telemetrySent == true
