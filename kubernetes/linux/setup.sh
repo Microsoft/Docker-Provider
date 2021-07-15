@@ -1,9 +1,27 @@
-TMPDIR="/opt"
-cd $TMPDIR
+cd /opt
+
+# set up apt repo for ruby2.6
+sudo apt-get install software-properties-common -y
+sudo apt-add-repository ppa:brightbox/ruby-ng -y
+# set up apt repo for fluent-bit(td-agent-bit)
+wget -qO - https://packages.fluentbit.io/fluentbit.key | sudo apt-key add -
+sudo echo "deb https://packages.fluentbit.io/ubuntu/xenial xenial main" >> /etc/apt/sources.list
+
+sudo apt-get update
+
+apt-get install -y libc-bin wget openssl curl sudo python-ctypes init-system-helpers  net-tools rsyslog cron vim dmidecode apt-transport-https gnupg
+
+# install telegraf in parallel with everything else to save build time
+(
+    wget https://dl.influxdata.com/telegraf/releases/telegraf-1.18.0_linux_amd64.tar.gz
+    tar -zxvf telegraf-1.18.0_linux_amd64.tar.gz
+    mv /opt/telegraf-1.18.0/usr/bin/telegraf /opt/telegraf
+    chmod 777 /opt/telegraf
+) &
 
 #Download utf-8 encoding capability on the omsagent container.
 #upgrade apt to latest version
-apt-get update && apt-get install -y apt && DEBIAN_FRONTEND=noninteractive apt-get install -y locales
+apt-get install -y apt && DEBIAN_FRONTEND=noninteractive apt-get install -y locales
 
 sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
     dpkg-reconfigure --frontend=noninteractive locales && \
@@ -12,12 +30,11 @@ sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
 #install oneagent - Official bits (05/17/2021)
 wget https://github.com/microsoft/Docker-Provider/releases/download/05172021-oneagent/azure-mdsd_1.10.1-build.master.213_x86_64.deb
 
-/usr/bin/dpkg -i $TMPDIR/azure-mdsd*.deb
-cp -f $TMPDIR/mdsd.xml /etc/mdsd.d
-cp -f $TMPDIR/envmdsd /etc/mdsd.d
+/usr/bin/dpkg -i /opt/azure-mdsd*.deb
+cp -f /opt/mdsd.xml /etc/mdsd.d
+cp -f /opt/envmdsd /etc/mdsd.d
 
 #download inotify tools for watching configmap changes
-sudo apt-get update
 sudo apt-get install inotify-tools -y
 
 #used to parse response of kubelet apis
@@ -27,26 +44,10 @@ sudo apt-get install jq=1.5+dfsg-2 -y
 #used to setcaps for ruby process to read /proc/env
 sudo apt-get install libcap2-bin -y
 
-wget https://dl.influxdata.com/telegraf/releases/telegraf-1.18.0_linux_amd64.tar.gz
-tar -zxvf telegraf-1.18.0_linux_amd64.tar.gz
-
-mv /opt/telegraf-1.18.0/usr/bin/telegraf /opt/telegraf
-
-chmod 777 /opt/telegraf
-
-# Use wildcard version so that it doesnt require to touch this file
-/$TMPDIR/docker-cimprov-*.*.*-*.x86_64.sh --install
-
 #download and install fluent-bit(td-agent-bit)
-wget -qO - https://packages.fluentbit.io/fluentbit.key | sudo apt-key add -
-sudo echo "deb https://packages.fluentbit.io/ubuntu/xenial xenial main" >> /etc/apt/sources.list
-sudo apt-get update
 sudo apt-get install td-agent-bit=1.6.8 -y
 
 # install ruby2.6
-sudo apt-get install software-properties-common -y
-sudo apt-add-repository ppa:brightbox/ruby-ng -y
-sudo apt-get update
 sudo apt-get install ruby2.6 ruby2.6-dev gcc make -y
 # fluentd v1 gem
 gem install fluentd -v "1.12.2" --no-document
@@ -54,10 +55,9 @@ fluentd --setup ./fluent
 gem install gyoku iso8601 --no-doc
 
 
-rm -f $TMPDIR/docker-cimprov*.sh
-rm -f $TMPDIR/azure-mdsd*.deb
-rm -f $TMPDIR/mdsd.xml
-rm -f $TMPDIR/envmdsd
+rm -f /opt/azure-mdsd*.deb
+rm -f /opt/mdsd.xml
+rm -f /opt/envmdsd
 
 # Remove settings for cron.daily that conflict with the node's cron.daily. Since both are trying to rotate the same files
 # in /var/log at the same time, the rotation doesn't happen correctly and then the *.1 file is forever logged to.
@@ -70,3 +70,5 @@ if [  -e "/var/lib/gems/2.6.0/gems/http_parser.rb-0.6.0/Gemfile.lock" ]; then
       echo "Renaming unused gemfile.lock for http_parser 0.6.0"
       mv /var/lib/gems/2.6.0/gems/http_parser.rb-0.6.0/Gemfile.lock /var/lib/gems/2.6.0/gems/http_parser.rb-0.6.0/renamed_Gemfile_lock.renamed
 fi
+
+wait  # in case telegraf hasn't finished installing yet
