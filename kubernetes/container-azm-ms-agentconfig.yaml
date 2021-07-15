@@ -144,7 +144,9 @@ data:
       tcp_listener_chunk_size = 10
       tcp_listener_buffer_size = 10
       tcp_listener_mem_buf_limit = 200
-
+    # tail buffer setting for large amounts of container stdout.
+    [agent_settings.fbit_config]
+      tail_mem_buf_limit_megabytes = 10
 metadata:
   name: container-azm-ms-agentconfig
   namespace: kube-system
