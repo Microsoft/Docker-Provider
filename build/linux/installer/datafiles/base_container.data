@@ -150,6 +150,9 @@ MAINTAINER:              'Microsoft Corporation'
 
 /etc/fluent/plugin/omslog.rb;                                                           source/plugins/utils/omslog.rb; 644; root; root
 /etc/fluent/plugin/oms_common.rb;                                                       source/plugins/utils/oms_common.rb; 644; root; root
+/etc/fluent/plugin/extension.rb;                                                        source/plugins/utils/extension.rb; 644; root; root
+/etc/fluent/plugin/extension_utils.rb;                                                  source/plugins/utils/extension_utils.rb; 644; root; root
+
 
 /etc/fluent/kube.conf;			                                                          build/linux/installer/conf/kube.conf;                  644; root; root
 /etc/fluent/container.conf;			                                                    build/linux/installer/conf/container.conf;                  644; root; root

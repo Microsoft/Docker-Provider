@@ -4,11 +4,12 @@
 
 require 'fluent/plugin/filter'
 
-module Fluent::Plugin    
+module Fluent::Plugin
+    require_relative 'extension_utils'
     require 'logger'
     require 'yajl/json_gem'
     Dir[File.join(__dir__, './health', '*.rb')].each { |file| require file }
- 
+
 
     class FilterHealthModelBuilder < Filter
         include HealthModel
@@ -22,7 +23,7 @@ module Fluent::Plugin
         attr_reader :buffer, :model_builder, :health_model_definition, :monitor_factory, :state_finalizers, :monitor_set, :model_builder, :hierarchy_builder, :resources, :kube_api_down_handler, :provider, :reducer, :state, :generator, :telemetry
 
 
-       
+
         @@cluster_id = KubernetesApiClient.getClusterId
         @@token_file_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
         @@cert_file_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -56,7 +57,7 @@ module Fluent::Plugin
                     deserialized_state_info = @cluster_health_state.get_state
                     @state.initialize_state(deserialized_state_info)
                 end
-                
+
             rescue => e
                 ApplicationInsightsUtility.sendExceptionTelemetry(e, {"FeatureArea" => "Health"})
             end
@@ -90,7 +91,14 @@ module Fluent::Plugin
             end
             begin
                 new_es = Fluent::MultiEventStream.new
-                time = Time.now                                                  
+                time = Time.now
+                if ExtensionUtils.isAADMSIAuthMode()
+                    $log.info("filter_health_model_builder::enumerate: AAD AUTH MSI MODE")
+                    if @rewrite_tag.nil? || !@rewrite_tag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+                      @rewrite_tag = ExtensionUtils.getOutputStreamId(Constants::KUBE_HEALTH_DATA_TYPE)
+                    end
+		            $log.info("filter_health_model_builder::filter_stream: using tag -#{@rewrite_tag} @ #{Time.now.utc.iso8601}")
+                end
 
                 if tag.start_with?("kubehealth.DaemonSet.Node")
                     node_records = []
@@ -222,7 +230,7 @@ module Fluent::Plugin
 
                     @log.info "after optimizing health signals all_monitors.size #{all_monitors.size}"
 
-                    
+
                     # for each key in monitor.keys,
                     # get the state from health_monitor_state
                     # generate the record to send
@@ -245,7 +253,7 @@ module Fluent::Plugin
                                         @cluster_new_state = new_state
                                 end
                             end
-                        end                       
+                        end
                         new_es.add(emit_time, record)
                     }
 
@@ -261,7 +269,7 @@ module Fluent::Plugin
                     @telemetry.send
                     # return an empty event stream, else the match will throw a NoMethodError
                     return Fluent::MultiEventStream.new
-                elsif tag.start_with?(@rewrite_tag) 
+                elsif tag.start_with?(@rewrite_tag)
                     # this filter also acts as a pass through as we are rewriting the tag and emitting to the fluent stream
                     es
                 else
@@ -273,6 +281,6 @@ module Fluent::Plugin
                  @log.warn "Message: #{e.message} Backtrace: #{e.backtrace}"
                  return nil
             end
-        end       
+        end
     end
 end

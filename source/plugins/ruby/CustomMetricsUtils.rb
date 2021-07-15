@@ -13,8 +13,8 @@ class CustomMetricsUtils
             if aks_region.to_s.empty? || aks_resource_id.to_s.empty?
                 return false # This will also take care of AKS-Engine Scenario. AKS_REGION/AKS_RESOURCE_ID is not set for AKS-Engine. Only ACS_RESOURCE_NAME is set
             end
-            
-            return aks_cloud_environment.to_s.downcase == 'public'
+
+            return aks_cloud_environment.to_s.downcase == 'azurepubliccloud'
         end
     end
 end

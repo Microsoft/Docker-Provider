@@ -12,7 +12,7 @@ waitforlisteneronTCPport() {
             echo "${FUNCNAME[0]} called with incorrect arguments<$1 , $2>. Required arguments <#port, #wait-time-in-seconds>"
             return -1
       else
-            
+
             if [[ $port =~ $numeric ]] && [[ $waittimesecs =~ $numeric ]]; then
                   #local varlistener=$(netstat -lnt | awk '$6 == "LISTEN" && $4 ~ ":25228$"')
                   while true
@@ -57,7 +57,11 @@ else
       export customResourceId=$AKS_RESOURCE_ID
       echo "export customResourceId=$AKS_RESOURCE_ID" >> ~/.bashrc
       source ~/.bashrc
-      echo "customResourceId:$customResourceId"     
+      echo "customResourceId:$customResourceId"
+      export customRegion=$AKS_REGION
+      echo "export customRegion=$AKS_REGION" >> ~/.bashrc
+      source ~/.bashrc
+      echo "customRegion:$customRegion"
 fi
 
 #set agent config schema version
@@ -194,9 +198,15 @@ fi
 if [ -z $domain ]; then
   ClOUD_ENVIRONMENT="unknown"
 elif [ $domain == "opinsights.azure.com" ]; then
-  CLOUD_ENVIRONMENT="public"
-else
-  CLOUD_ENVIRONMENT="national"
+  CLOUD_ENVIRONMENT="azurepubliccloud"
+elif [ $domain == "opinsights.azure.cn" ]; then
+  CLOUD_ENVIRONMENT="azurechinacloud"
+elif [ $domain == "opinsights.azure.us" ]; then
+  CLOUD_ENVIRONMENT="azureusgovernmentcloud"
+elif [ $domain == "opinsights.azure.eaglex.ic.gov" ]; then
+  CLOUD_ENVIRONMENT="usnat"
+elif [ $domain == "opinsights.azure.microsoft.scloud" ]; then
+  CLOUD_ENVIRONMENT="ussec"
 fi
 export CLOUD_ENVIRONMENT=$CLOUD_ENVIRONMENT
 echo "export CLOUD_ENVIRONMENT=$CLOUD_ENVIRONMENT" >> ~/.bashrc
@@ -233,9 +243,9 @@ if [ ${#APPLICATIONINSIGHTS_AUTH_URL} -ge 1 ]; then  # (check if APPLICATIONINSI
 fi
 
 
-aikey=$(echo $APPLICATIONINSIGHTS_AUTH | base64 --decode)	
-export TELEMETRY_APPLICATIONINSIGHTS_KEY=$aikey	
-echo "export TELEMETRY_APPLICATIONINSIGHTS_KEY=$aikey" >> ~/.bashrc	
+aikey=$(echo $APPLICATIONINSIGHTS_AUTH | base64 --decode)
+export TELEMETRY_APPLICATIONINSIGHTS_KEY=$aikey
+echo "export TELEMETRY_APPLICATIONINSIGHTS_KEY=$aikey" >> ~/.bashrc
 
 source ~/.bashrc
 
@@ -421,7 +431,7 @@ export KUBELET_RUNTIME_OPERATIONS_ERRORS_METRIC="kubelet_docker_operations_error
 if [ "$CONTAINER_RUNTIME" != "docker" ]; then
    # these metrics are avialble only on k8s versions <1.18 and will get deprecated from 1.18
    export KUBELET_RUNTIME_OPERATIONS_METRIC="kubelet_runtime_operations"
-   export KUBELET_RUNTIME_OPERATIONS_ERRORS_METRIC="kubelet_runtime_operations_errors"  
+   export KUBELET_RUNTIME_OPERATIONS_ERRORS_METRIC="kubelet_runtime_operations_errors"
 fi
 
 echo "set caps for ruby process to read container env from proc"
@@ -445,34 +455,56 @@ DOCKER_CIMPROV_VERSION=$(dpkg -l | grep docker-cimprov | awk '{print $3}')
 echo "DOCKER_CIMPROV_VERSION=$DOCKER_CIMPROV_VERSION"
 export DOCKER_CIMPROV_VERSION=$DOCKER_CIMPROV_VERSION
 echo "export DOCKER_CIMPROV_VERSION=$DOCKER_CIMPROV_VERSION" >> ~/.bashrc
-echo "*** activating oneagent in legacy auth mode ***"
-CIWORKSPACE_id="$(cat /etc/omsagent-secret/WSID)"     
-#use the file path as its secure than env
-CIWORKSPACE_keyFile="/etc/omsagent-secret/KEY"   
-cat /etc/mdsd.d/envmdsd | while read line; do
-     echo $line >> ~/.bashrc
-done
-source /etc/mdsd.d/envmdsd
-echo "setting mdsd workspaceid & key for workspace:$CIWORKSPACE_id"
-export CIWORKSPACE_id=$CIWORKSPACE_id
-echo "export CIWORKSPACE_id=$CIWORKSPACE_id" >> ~/.bashrc      
-export CIWORKSPACE_keyFile=$CIWORKSPACE_keyFile
-echo "export CIWORKSPACE_keyFile=$CIWORKSPACE_keyFile" >> ~/.bashrc
-export OMS_TLD=$domain
-echo "export OMS_TLD=$OMS_TLD" >> ~/.bashrc      
-export MDSD_FLUENT_SOCKET_PORT="29230"
-echo "export MDSD_FLUENT_SOCKET_PORT=$MDSD_FLUENT_SOCKET_PORT" >> ~/.bashrc
 
-#skip imds lookup since not used in legacy auth path  
+#skip imds lookup since not used either legacy or aad msi auth path
 export SKIP_IMDS_LOOKUP_FOR_LEGACY_AUTH="true"
 echo "export SKIP_IMDS_LOOKUP_FOR_LEGACY_AUTH=$SKIP_IMDS_LOOKUP_FOR_LEGACY_AUTH" >> ~/.bashrc
-
+# this used by mdsd to determine cloud specific LA endpoints
+export OMS_TLD=$domain
+echo "export OMS_TLD=$OMS_TLD" >> ~/.bashrc
+cat /etc/mdsd.d/envmdsd | while read line; do
+   echo $line >> ~/.bashrc
+done
+source /etc/mdsd.d/envmdsd
+MDSD_AAD_MSI_AUTH_ARGS=""
+# check if its AAD Auth MSI mode via USING_AAD_MSI_AUTH
+export AAD_MSI_AUTH_MODE=false
+if [ "${USING_AAD_MSI_AUTH}" == "true" ]; then
+   echo "*** activating oneagent in aad auth msi mode ***"
+   # msi auth specific args
+   MDSD_AAD_MSI_AUTH_ARGS="-a -A"
+   export AAD_MSI_AUTH_MODE=true
+   echo "export AAD_MSI_AUTH_MODE=true" >> ~/.bashrc
+   # this used by mdsd to determine the cloud specific AMCS endpoints
+   export customEnvironment=$CLOUD_ENVIRONMENT
+   echo "export customEnvironment=$customEnvironment" >> ~/.bashrc
+   export MDSD_FLUENT_SOCKET_PORT="28230"
+   echo "export MDSD_FLUENT_SOCKET_PORT=$MDSD_FLUENT_SOCKET_PORT" >> ~/.bashrc
+   export ENABLE_MCS="true"
+   echo "export ENABLE_MCS=$ENABLE_MCS" >> ~/.bashrc
+   export MONITORING_USE_GENEVA_CONFIG_SERVICE="false"
+   echo "export MONITORING_USE_GENEVA_CONFIG_SERVICE=$MONITORING_USE_GENEVA_CONFIG_SERVICE" >> ~/.bashrc
+   export MDSD_USE_LOCAL_PERSISTENCY="false"
+   echo "export MDSD_USE_LOCAL_PERSISTENCY=$MDSD_USE_LOCAL_PERSISTENCY" >> ~/.bashrc
+else
+  echo "*** activating oneagent in legacy auth mode ***"
+  CIWORKSPACE_id="$(cat /etc/omsagent-secret/WSID)"
+  #use the file path as its secure than env
+  CIWORKSPACE_keyFile="/etc/omsagent-secret/KEY"
+  echo "setting mdsd workspaceid & key for workspace:$CIWORKSPACE_id"
+  export CIWORKSPACE_id=$CIWORKSPACE_id
+  echo "export CIWORKSPACE_id=$CIWORKSPACE_id" >> ~/.bashrc
+  export CIWORKSPACE_keyFile=$CIWORKSPACE_keyFile
+  echo "export CIWORKSPACE_keyFile=$CIWORKSPACE_keyFile" >> ~/.bashrc
+  export MDSD_FLUENT_SOCKET_PORT="29230"
+  echo "export MDSD_FLUENT_SOCKET_PORT=$MDSD_FLUENT_SOCKET_PORT" >> ~/.bashrc
+fi
 source ~/.bashrc
 
 dpkg -l | grep mdsd | awk '{print $2 " " $3}'
 
-if [ "${CONTAINER_TYPE}" == "PrometheusSidecar" ]; then   
-    echo "starting mdsd with mdsd-port=26130, fluentport=26230 and influxport=26330 in legacy auth mode in sidecar container..."                 
+if [ "${CONTAINER_TYPE}" == "PrometheusSidecar" ]; then
+    echo "starting mdsd with mdsd-port=26130, fluentport=26230 and influxport=26330 in sidecar container..."
     #use tenant name to avoid unix socket conflict and different ports for port conflict
     #roleprefix to use container specific mdsd socket
     export TENANT_NAME="${CONTAINER_TYPE}"
@@ -482,23 +514,23 @@ if [ "${CONTAINER_TYPE}" == "PrometheusSidecar" ]; then
     source ~/.bashrc
     mkdir /var/run/mdsd-${CONTAINER_TYPE}
     # add -T 0xFFFF for full traces
-    mdsd -r ${MDSD_ROLE_PREFIX} -p 26130 -f 26230 -i 26330 -e ${MDSD_LOG}/mdsd.err -w ${MDSD_LOG}/mdsd.warn -o ${MDSD_LOG}/mdsd.info -q ${MDSD_LOG}/mdsd.qos &
-else          
-   echo "starting mdsd in legacy auth mode in main container..."
-   # add -T 0xFFFF for full traces
-   mdsd -e ${MDSD_LOG}/mdsd.err -w ${MDSD_LOG}/mdsd.warn -o ${MDSD_LOG}/mdsd.info -q ${MDSD_LOG}/mdsd.qos &  
+    mdsd ${MDSD_AAD_MSI_AUTH_ARGS} -r ${MDSD_ROLE_PREFIX} -p 26130 -f 26230 -i 26330 -e ${MDSD_LOG}/mdsd.err -w ${MDSD_LOG}/mdsd.warn -o ${MDSD_LOG}/mdsd.info -q ${MDSD_LOG}/mdsd.qos &
+else
+    echo "starting mdsd mode in main container..."
+    # add -T 0xFFFF for full traces
+    mdsd ${MDSD_AAD_MSI_AUTH_ARGS} -e ${MDSD_LOG}/mdsd.err -w ${MDSD_LOG}/mdsd.warn -o ${MDSD_LOG}/mdsd.info -q ${MDSD_LOG}/mdsd.qos &
 fi
 
-# no dependency on fluentd for prometheus side car container  
-if [ "${CONTAINER_TYPE}" != "PrometheusSidecar" ]; then     
+# no dependency on fluentd for prometheus side car container
+if [ "${CONTAINER_TYPE}" != "PrometheusSidecar" ]; then
       if [ ! -e "/etc/config/kube.conf" ]; then
          echo "*** starting fluentd v1 in daemonset"
          fluentd -c /etc/fluent/container.conf -o /var/opt/microsoft/docker-cimprov/log/fluentd.log --log-rotate-age 5 --log-rotate-size 20971520 &
       else
         echo "*** starting fluentd v1 in replicaset"
         fluentd -c /etc/fluent/kube.conf -o /var/opt/microsoft/docker-cimprov/log/fluentd.log --log-rotate-age 5 --log-rotate-size 20971520 &
-      fi      
-fi   
+      fi
+fi
 
 #If config parsing was successful, a copy of the conf file with replaced custom settings file is created
 if [ ! -e "/etc/config/kube.conf" ]; then
@@ -635,7 +667,7 @@ echo "getting rsyslog status..."
 service rsyslog status
 
 shutdown() {
-	 pkill -f mdsd 
+	 pkill -f mdsd
 	}
 
 trap "shutdown" SIGTERM

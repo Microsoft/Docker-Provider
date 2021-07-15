@@ -43,16 +43,48 @@ function Start-FileSystemWatcher {
 
 function Set-EnvironmentVariables {
     $domain = "opinsights.azure.com"
-    $cloud_environment = "public"
+    $mcs_endpoint = "monitor.azure.com"
+    $cloud_environment = "azurepubliccloud"
     if (Test-Path /etc/omsagent-secret/DOMAIN) {
         # TODO: Change to omsagent-secret before merging
         $domain = Get-Content /etc/omsagent-secret/DOMAIN
-        $cloud_environment = "national"
+        if (![string]::IsNullOrEmpty($domain)) {
+            if ($domain -eq "opinsights.azure.com") {
+                $cloud_environment = "azurepubliccloud"
+                $mcs_endpoint = "monitor.azure.com"
+            } elseif ($domain -eq "opinsights.azure.cn") {
+                $cloud_environment = "azurechinacloud"
+                $mcs_endpoint = "monitor.azure.cn"
+            } elseif ($domain -eq "opinsights.azure.us") {
+                $cloud_environment = "azureusgovernmentcloud"
+                $mcs_endpoint = "monitor.azure.us"
+            } elseif ($domain -eq "opinsights.azure.eaglex.ic.gov") {
+                $cloud_environment = "usnat"
+                $mcs_endpoint = "monitor.azure.eaglex.ic.gov"
+            } elseif ($domain -eq "opinsights.azure.microsoft.scloud") {
+                $cloud_environment = "ussec"
+                $mcs_endpoint = "monitor.azure.microsoft.scloud"
+            } else {
+                Write-Host "Invalid or Unsupported domain name $($domain). EXITING....."
+                exit 1
+            }
+        } else {
+            Write-Host "Domain name either null or empty. EXITING....."
+            exit 1
+        }
     }
+
+    Write-Host "Log analytics domain: $($domain)"
+    Write-Host "MCS endpoint: $($mcs_endpoint)"
+    Write-Host "Cloud Environment: $($cloud_environment)"
 
     # Set DOMAIN
     [System.Environment]::SetEnvironmentVariable("DOMAIN", $domain, "Process")
     [System.Environment]::SetEnvironmentVariable("DOMAIN", $domain, "Machine")
+
+    # Set MCS Endpoint
+    [System.Environment]::SetEnvironmentVariable("MCS_ENDPOINT", $mcs_endpoint, "Process")
+    [System.Environment]::SetEnvironmentVariable("MCS_ENDPOINT", $mcs_endpoint, "Machine")
 
     # Set CLOUD_ENVIRONMENT
     [System.Environment]::SetEnvironmentVariable("CLOUD_ENVIRONMENT", $cloud_environment, "Process")
@@ -158,7 +190,7 @@ function Set-EnvironmentVariables {
                 Write-Host $_.Exception
             }
         }
-        
+
         # Check if the fetched IKey was properly encoded. if not then turn off telemetry
         if ($aiKeyFetched -match '^[A-Za-z0-9=]+$') {
             Write-Host "Using cloud-specific instrumentation key"
@@ -229,6 +261,21 @@ function Set-EnvironmentVariables {
         Write-Host "Failed to set environment variable HOSTNAME for target 'machine' since it is either null or empty"
     }
 
+    # check if its AAD Auth MSI mode via USING_AAD_MSI_AUTH environment variable
+    $isAADMSIAuth = [System.Environment]::GetEnvironmentVariable("USING_AAD_MSI_AUTH", "process")
+    if (![string]::IsNullOrEmpty($isAADMSIAuth)) {
+        [System.Environment]::SetEnvironmentVariable("AAD_MSI_AUTH_MODE", $isAADMSIAuth, "Process")
+        [System.Environment]::SetEnvironmentVariable("AAD_MSI_AUTH_MODE", $isAADMSIAuth, "Machine")
+        Write-Host "Successfully set environment variable AAD_MSI_AUTH_MODE - $($isAADMSIAuth) for target 'machine'..."
+    }
+
+    # check if use token proxy endpoint set via USE_IMDS_TOKEN_PROXY_END_POINT environment variable
+    $useIMDSTokenProxyEndpoint = [System.Environment]::GetEnvironmentVariable("USE_IMDS_TOKEN_PROXY_END_POINT", "process")
+    if (![string]::IsNullOrEmpty($useIMDSTokenProxyEndpoint)) {
+        [System.Environment]::SetEnvironmentVariable("USE_IMDS_TOKEN_PROXY_END_POINT", $useIMDSTokenProxyEndpoint, "Process")
+        [System.Environment]::SetEnvironmentVariable("USE_IMDS_TOKEN_PROXY_END_POINT", $useIMDSTokenProxyEndpoint, "Machine")
+        Write-Host "Successfully set environment variable USE_IMDS_TOKEN_PROXY_END_POINT - $($useIMDSTokenProxyEndpoint) for target 'machine'..."
+    }
     $nodeIp = [System.Environment]::GetEnvironmentVariable("NODE_IP", "process")
     if (![string]::IsNullOrEmpty($nodeIp)) {
         [System.Environment]::SetEnvironmentVariable("NODE_IP", $nodeIp, "machine")
@@ -427,7 +474,24 @@ function Start-Telegraf {
     else {
         Write-Host "Failed to set environment variable KUBERNETES_SERVICE_PORT for target 'machine' since it is either null or empty"
     }
-    
+<<<<<<< HEAD
+<<<<<<< HEAD
+
+    $nodeIp = [System.Environment]::GetEnvironmentVariable("NODE_IP", "process")
+    if (![string]::IsNullOrEmpty($nodeIp)) {
+        [System.Environment]::SetEnvironmentVariable("NODE_IP", $nodeIp, "machine")
+        Write-Host "Successfully set environment variable NODE_IP - $($nodeIp) for target 'machine'..."
+    }
+    else {
+        Write-Host "Failed to set environment variable NODE_IP for target 'machine' since it is either null or empty"
+    }
+
+=======
+
+>>>>>>> 6df299f9... Cherry picking hotfix changes to ci_dev (#605)
+=======
+
+>>>>>>> ci_dev
     Write-Host "Installing telegraf service"
     C:\opt\telegraf\telegraf.exe --service install --config "C:\etc\telegraf\telegraf.conf"
 
@@ -524,8 +588,13 @@ if (![string]::IsNullOrEmpty($requiresCertBootstrap) -and `
     Bootstrap-CACertificates
 }
 
-Generate-Certificates
-Test-CertificatePath
+$isAADMSIAuth = [System.Environment]::GetEnvironmentVariable("USING_AAD_MSI_AUTH")
+if (![string]::IsNullOrEmpty($isAADMSIAuth) -and $isAADMSIAuth.ToLower() -eq 'true') {
+    Write-Host "skipping agent onboarding via cert since AAD MSI Auth configured"
+} else {
+    Generate-Certificates
+    Test-CertificatePath
+}
 Start-Fluent-Telegraf
 
 # List all powershell processes running. This should have main.ps1 and filesystemwatcher.ps1

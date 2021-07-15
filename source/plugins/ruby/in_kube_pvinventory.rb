@@ -20,6 +20,7 @@ module Fluent::Plugin
       require_relative "oms_common"
       require_relative "omslog"
       require_relative "constants"
+      require_relative "extension_utils"
 
       # Response size is around 1500 bytes per PV
       @PV_CHUNK_SIZE = "5000"
@@ -33,7 +34,7 @@ module Fluent::Plugin
       super
     end
 
-    def start      
+    def start
       if @run_interval
         super
         @finished = false
@@ -61,7 +62,13 @@ module Fluent::Plugin
         telemetryFlush = false
         @pvTypeToCountHash = {}
         currentTime = Time.now
-        batchTime = currentTime.utc.iso8601           
+        batchTime = currentTime.utc.iso8601
+        if ExtensionUtils.isAADMSIAuthMode()
+          $log.info("in_kube_pvinventory::enumerate: AAD AUTH MSI MODE")
+          if @tag.nil? || !@tag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+            @tag = ExtensionUtils.getOutputStreamId(Constants::KUBE_PV_INVENTORY_DATA_TYPE)
+          end
+        end
 
         continuationToken = nil
         $log.info("in_kube_pvinventory::enumerate : Getting PVs from Kube API @ #{Time.now.utc.iso8601}")
@@ -93,7 +100,7 @@ module Fluent::Plugin
         if (timeDifferenceInMinutes >= Constants::TELEMETRY_FLUSH_INTERVAL_IN_MINUTES)
           telemetryFlush = true
         end
-        
+
         # Flush AppInsights telemetry once all the processing is done
         if telemetryFlush == true
           telemetryProperties = {}
@@ -110,8 +117,8 @@ module Fluent::Plugin
     end # end enumerate
 
     def parse_and_emit_records(pvInventory, batchTime = Time.utc.iso8601)
-      currentTime = Time.now  
-      emitTime = Fluent::Engine.now    
+      currentTime = Time.now
+      emitTime = Fluent::Engine.now
       eventStream = Fluent::MultiEventStream.new
       @@istestvar = ENV["ISTEST"]
       begin
@@ -152,8 +159,8 @@ module Fluent::Plugin
         end
 
         records.each do |record|
-          if !record.nil?          
-            eventStream.add(emitTime, record) 
+          if !record.nil?
+            eventStream.add(emitTime, record)
           end
         end
 
@@ -191,7 +198,7 @@ module Fluent::Plugin
       begin
         if !item["spec"].nil?
           (Constants::PV_TYPES).each do |pvType|
-      
+
             # PV is this type
             if !item["spec"][pvType].nil?
 
@@ -252,6 +259,6 @@ module Fluent::Plugin
         @mutex.lock
       end
       @mutex.unlock
-    end   
+    end
   end # Kube_PVInventory_Input
 end # module

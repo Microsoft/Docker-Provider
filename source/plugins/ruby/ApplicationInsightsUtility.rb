@@ -21,6 +21,8 @@ class ApplicationInsightsUtility
   @@EnvApplicationInsightsEndpoint = "APPLICATIONINSIGHTS_ENDPOINT"
   @@EnvControllerType = "CONTROLLER_TYPE"
   @@EnvContainerRuntime = "CONTAINER_RUNTIME"
+  @@EnvAADMSIAuthMode = "AAD_MSI_AUTH_MODE"
+
   @@isWindows = false
   @@hostName = (OMS::Common.get_hostname)
   @@os_type = ENV["OS_TYPE"]
@@ -82,7 +84,12 @@ class ApplicationInsightsUtility
           isProxyConfigured = false
           $log.info("proxy is not configured")
         end
-
+        aadAuthMSIMode = ENV[@@EnvAADMSIAuthMode]
+        if !aadAuthMSIMode.nil? && !aadAuthMSIMode.empty? && aadAuthMSIMode.downcase == "true".downcase
+          @@CustomProperties["aadAuthMSIMode"] = "true"
+        else
+          @@CustomProperties["aadAuthMSIMode"] = "false"
+        end
         #Check if telemetry is turned off
         telemetryOffSwitch = ENV["DISABLE_TELEMETRY"]
         if telemetryOffSwitch && !telemetryOffSwitch.nil? && !telemetryOffSwitch.empty? && telemetryOffSwitch.downcase == "true".downcase

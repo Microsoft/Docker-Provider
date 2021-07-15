@@ -20,7 +20,8 @@ module Fluent::Plugin
       require_relative "CAdvisorMetricsAPIClient"
       require_relative "oms_common"
       require_relative "omslog"
-      require_relative "constants"      
+      require_relative "constants"
+      require_relative "extension_utils"
     end
 
     config_param :run_interval, :time, :default => 60
@@ -61,13 +62,24 @@ module Fluent::Plugin
       batchTime = currentTime.utc.iso8601
       @@istestvar = ENV["ISTEST"]
       begin
-        eventStream = Fluent::MultiEventStream.new      
+        eventStream = Fluent::MultiEventStream.new
         insightsMetricsEventStream = Fluent::MultiEventStream.new
         metricData = CAdvisorMetricsAPIClient.getMetrics(winNode: nil, metricTime: batchTime )
-        metricData.each do |record|          
-          eventStream.add(time, record) if record                  
-        end       
-        
+        metricData.each do |record|
+          eventStream.add(time, record) if record
+        end
+
+        if ExtensionUtils.isAADMSIAuthMode()
+          $log.info("in_cadvisor_perf::enumerate: AAD AUTH MSI MODE")
+          if @tag.nil? || !@tag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+            @tag = ExtensionUtils.getOutputStreamId(Constants::PERF_DATA_TYPE)
+          end
+          if @insightsmetricstag.nil? || !@insightsmetricstag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+            @insightsmetricstag = ExtensionUtils.getOutputStreamId(Constants::INSIGHTS_METRICS_DATA_TYPE)
+          end
+	        $log.info("in_cadvisor_perf::enumerate: using perf tag -#{@tag} @ #{Time.now.utc.iso8601}")
+          $log.info("in_cadvisor_perf::enumerate: using insightsmetrics tag -#{@insightsmetricstag} @ #{Time.now.utc.iso8601}")
+        end
         router.emit_stream(@tag, eventStream) if eventStream
         router.emit_stream(@mdmtag, eventStream) if eventStream
         router.emit_stream(@containerhealthtag, eventStream) if eventStream
@@ -136,6 +148,6 @@ module Fluent::Plugin
         @mutex.lock
       end
       @mutex.unlock
-    end      
+    end
   end # CAdvisor_Perf_Input
 end # module

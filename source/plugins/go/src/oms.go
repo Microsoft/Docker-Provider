@@ -22,6 +22,7 @@ import (
 	"github.com/tinylib/msgp/msgp"
 
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"Docker-Provider/source/plugins/go/src/extension"
 
 	"github.com/Azure/azure-kusto-go/kusto/ingest"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,6 +89,7 @@ const IPName = "ContainerInsights"
 const defaultContainerInventoryRefreshInterval = 60
 
 const kubeMonAgentConfigEventFlushInterval = 60
+const defaultIngestionAuthTokenRefreshIntervalSeconds = 3600
 
 //Eventsource name in mdsd
 const MdsdContainerLogSourceName = "ContainerLogSource"
@@ -106,6 +108,11 @@ const ContainerLogsV1Route = "v1"
 //container logs schema (v2=ContainerLogsV2 table in LA, anything else ContainerLogs table in LA. This is applicable only if Container logs route is NOT ADX)
 const ContainerLogV2SchemaVersion = "v2"
 
+//env variable for AAD MSI Auth mode
+const AADMSIAuthMode = "AAD_MSI_AUTH_MODE"
+
+// Tag prefix of mdsd output streamid for AMA in MSI auth mode
+const MdsdOutputStreamIdTagPrefix = "dcr-"
 
 //env variable to container type
 const ContainerTypeEnv = "CONTAINER_TYPE"
@@ -168,7 +175,9 @@ var (
 	// flag to check if its Windows OS
 	IsWindows bool
 	// container type 
-	ContainerType string	
+	ContainerType string		
+	// flag to check whether LA AAD MSI Auth Enabled or not
+	IsAADMSIAuthMode bool
 )
 
 var (
@@ -194,6 +203,10 @@ var (
 	EventHashUpdateMutex = &sync.Mutex{}
 	// parent context used by ADX uploader
 	ParentContext = context.Background()
+	// IngestionAuthTokenUpdateMutex read and write mutex access for ODSIngestionAuthToken
+	IngestionAuthTokenUpdateMutex = &sync.Mutex{}
+	// ODSIngestionAuthToken for windows agent AAD MSI Auth
+	ODSIngestionAuthToken string 
 )
 
 var (
@@ -201,6 +214,8 @@ var (
 	ContainerImageNameRefreshTicker *time.Ticker
 	// KubeMonAgentConfigEventsSendTicker to send config events every hour
 	KubeMonAgentConfigEventsSendTicker *time.Ticker
+	// IngestionAuthTokenRefreshTicker to refresh ingestion token
+	IngestionAuthTokenRefreshTicker *time.Ticker
 )
 
 var (
@@ -702,7 +717,11 @@ func flushKubeMonAgentEventRecords() {
 					}
 				}
 			}
-			if (IsWindows == false && len(msgPackEntries) > 0) { //for linux, mdsd route												
+			if (IsWindows == false && len(msgPackEntries) > 0) { //for linux, mdsd route	
+				if IsAADMSIAuthMode == true && strings.HasPrefix(MdsdKubeMonAgentEventsTagName, MdsdOutputStreamIdTagPrefix) == false {
+					Log("Info::mdsd::obtaining output stream id for data type: %s", KubeMonAgentEventDataType)
+					MdsdKubeMonAgentEventsTagName = extension.GetInstance(FLBLogger, ContainerType).GetOutputStreamId(KubeMonAgentEventDataType)
+				}											
 				Log("Info::mdsd:: using mdsdsource name for KubeMonAgentEvents: %s", MdsdKubeMonAgentEventsTagName)
 				msgpBytes := convertMsgPackEntriesToMsgpBytes(MdsdKubeMonAgentEventsTagName, msgPackEntries)							
 				if MdsdKubeMonMsgpUnixSocketClient == nil {
@@ -758,6 +777,16 @@ func flushKubeMonAgentEventRecords() {
 					//expensive to do string len for every request, so use a flag
 					if ResourceCentric == true {
 						req.Header.Set("x-ms-AzureResourceId", ResourceID)
+					}
+
+					if IsAADMSIAuthMode == true {
+						IngestionAuthTokenUpdateMutex.Lock()
+			            ingestionAuthToken := ODSIngestionAuthToken
+			            IngestionAuthTokenUpdateMutex.Unlock()												
+						if ingestionAuthToken == "" {		
+							Log("Error::ODS Ingestion Auth Token is empty. Please check error log.")																							
+						}					
+						req.Header.Set("Authorization", "Bearer "+ingestionAuthToken)
 					}
 
 					resp, err := HTTPClient.Do(req)
@@ -904,7 +933,11 @@ func PostTelegrafMetricsToLA(telegrafRecords []map[interface{}]interface{}) int 
 					}				
 				}
 		}
-		if (len(msgPackEntries) > 0) {							
+		if (len(msgPackEntries) > 0) {	
+			    if IsAADMSIAuthMode == true && (strings.HasPrefix(MdsdInsightsMetricsTagName, MdsdOutputStreamIdTagPrefix) == false) {
+				  Log("Info::mdsd::obtaining output stream id for InsightsMetricsDataType since Log Analytics AAD MSI Auth Enabled")
+				  MdsdInsightsMetricsTagName = extension.GetInstance(FLBLogger, ContainerType).GetOutputStreamId(InsightsMetricsDataType)
+			    }						
 				msgpBytes := convertMsgPackEntriesToMsgpBytes(MdsdInsightsMetricsTagName, msgPackEntries)			
 				if MdsdInsightsMetricsMsgpUnixSocketClient == nil {
 					Log("Error::mdsd::mdsd connection does not exist. re-connecting ...")
@@ -978,6 +1011,18 @@ func PostTelegrafMetricsToLA(telegrafRecords []map[interface{}]interface{}) int 
 		//expensive to do string len for every request, so use a flag
 		if ResourceCentric == true {
 			req.Header.Set("x-ms-AzureResourceId", ResourceID)
+		}
+		if IsAADMSIAuthMode == true {
+			IngestionAuthTokenUpdateMutex.Lock()
+			ingestionAuthToken := ODSIngestionAuthToken
+			IngestionAuthTokenUpdateMutex.Unlock()													
+			if ingestionAuthToken == "" {				
+				message := "Error::ODS Ingestion Auth Token is empty. Please check error log."				
+				Log(message)
+				return output.FLB_RETRY
+			}
+			// add authorization header to the req
+			req.Header.Set("Authorization", "Bearer "+ingestionAuthToken)
 		}
 
 		start := time.Now()
@@ -1184,6 +1229,16 @@ func PostDataHelper(tailPluginRecords []map[interface{}]interface{}) int {
 
 	if len(msgPackEntries) > 0 && ContainerLogsRouteV2 == true {
 		//flush to mdsd			
+		if IsAADMSIAuthMode == true && strings.HasPrefix(MdsdContainerLogTagName, MdsdOutputStreamIdTagPrefix) == false {
+			Log("Info::mdsd::obtaining output stream id")
+			if ContainerLogSchemaV2 == true {
+				MdsdContainerLogTagName = extension.GetInstance(FLBLogger, ContainerType).GetOutputStreamId(ContainerLogV2DataType)
+			} else {
+				MdsdContainerLogTagName = extension.GetInstance(FLBLogger, ContainerType).GetOutputStreamId(ContainerLogDataType)
+			}
+			Log("Info::mdsd:: using mdsdsource name: %s", MdsdContainerLogTagName)
+		}
+		
 		fluentForward := MsgPackForward{
 			Tag:     MdsdContainerLogTagName,
 			Entries: msgPackEntries,
@@ -1343,6 +1398,18 @@ func PostDataHelper(tailPluginRecords []map[interface{}]interface{}) int {
 			req.Header.Set("x-ms-AzureResourceId", ResourceID)
 		}
 		
+		if IsAADMSIAuthMode == true {
+			IngestionAuthTokenUpdateMutex.Lock()
+			ingestionAuthToken := ODSIngestionAuthToken
+			IngestionAuthTokenUpdateMutex.Unlock()
+			if ingestionAuthToken == "" {								
+				Log("Error::ODS Ingestion Auth Token is empty. Please check error log.")				
+				return output.FLB_RETRY
+			}
+			// add authorization header to the req
+		    req.Header.Set("Authorization", "Bearer "+ingestionAuthToken)
+		}		
+		
 		resp, err := HTTPClient.Do(req)
 		elapsed = time.Since(start)
 
@@ -1439,8 +1506,7 @@ func GetContainerIDK8sNamespacePodNameFromFileName(filename string) (string, str
 }
 
 // InitializePlugin reads and populates plugin configuration
-func InitializePlugin(pluginConfPath string, agentVersion string) {
-
+func InitializePlugin(pluginConfPath string, agentVersion string) {	
 	go func() {
 		isTest := os.Getenv("ISTEST")
 		if strings.Compare(strings.ToLower(strings.TrimSpace(isTest)), "true") == 0 {
@@ -1541,6 +1607,11 @@ func InitializePlugin(pluginConfPath string, agentVersion string) {
 	}
 
 	Log("OMSEndpoint %s", OMSEndpoint)
+	IsAADMSIAuthMode = false
+	if strings.Compare(strings.ToLower(os.Getenv(AADMSIAuthMode)), "true") == 0 {
+		IsAADMSIAuthMode = true
+		Log("AAD MSI Auth Mode Configured")		
+	}
 	ResourceID = os.Getenv(envAKSResourceID)
 
 	if len(ResourceID) > 0 {
@@ -1712,5 +1783,11 @@ func InitializePlugin(pluginConfPath string, agentVersion string) {
     }
 
 	MdsdInsightsMetricsTagName = MdsdInsightsMetricsSourceName
-    MdsdKubeMonAgentEventsTagName = MdsdKubeMonAgentEventsSourceName		
+    MdsdKubeMonAgentEventsTagName = MdsdKubeMonAgentEventsSourceName	
+	Log("ContainerLogsRouteADX: %v, IsWindows: %v, IsAADMSIAuthMode = %v \n", ContainerLogsRouteADX, IsWindows, IsAADMSIAuthMode)
+	if !ContainerLogsRouteADX && IsWindows && IsAADMSIAuthMode {
+		Log("defaultIngestionAuthTokenRefreshIntervalSeconds = %d \n", defaultIngestionAuthTokenRefreshIntervalSeconds)
+	    IngestionAuthTokenRefreshTicker = time.NewTicker(time.Second * time.Duration(defaultIngestionAuthTokenRefreshIntervalSeconds))
+		go refreshIngestionAuthToken()
+	}
 }

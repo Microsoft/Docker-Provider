@@ -36,14 +36,18 @@ module Fluent
 
     def enumerate
       begin
-        puts "Calling certificate renewal code..."
-        maintenance = OMS::OnboardingHelper.new(
-          ENV["WSID"],
-          ENV["DOMAIN"],
-          ENV["CI_AGENT_GUID"]
-        )
-        ret_code = maintenance.register_certs()
-        puts "Return code from register certs : #{ret_code}"
+        if !ENV["AAD_MSI_AUTH_MODE"].nil? && !ENV["AAD_MSI_AUTH_MODE"].empty? && ENV["AAD_MSI_AUTH_MODE"].downcase == "true"
+          puts "skipping certificate renewal code since AAD MSI auth configured"
+        else
+          puts "Calling certificate renewal code..."
+          maintenance = OMS::OnboardingHelper.new(
+            ENV["WSID"],
+            ENV["DOMAIN"],
+            ENV["CI_AGENT_GUID"]
+          )
+          ret_code = maintenance.register_certs()
+          puts "Return code from register certs : #{ret_code}"
+        end
       rescue => errorStr
         puts "in_heartbeat_request::enumerate:Failed in enumerate: #{errorStr}"
         # STDOUT telemetry should alredy be going to Traces in AI.

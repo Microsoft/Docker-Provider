@@ -3,7 +3,7 @@
 
 require 'fluent/plugin/input'
 
-module Fluent::Plugin  
+module Fluent::Plugin
   class Kube_Event_Input < Input
     Fluent::Plugin.register_input("kube_events", self)
     @@KubeEventsStateFile = "/var/opt/microsoft/docker-cimprov/state/KubeEventQueryState.yaml"
@@ -18,6 +18,7 @@ module Fluent::Plugin
       require_relative "oms_common"
       require_relative "omslog"
       require_relative "ApplicationInsightsUtility"
+      require_relative "extension_utils"
 
       # refer tomlparser-agent-config for defaults
       # this configurable via configmap
@@ -37,7 +38,7 @@ module Fluent::Plugin
       super
     end
 
-    def start      
+    def start
       if @run_interval
         super
         if !ENV["EVENTS_CHUNK_SIZE"].nil? && !ENV["EVENTS_CHUNK_SIZE"].empty? && ENV["EVENTS_CHUNK_SIZE"].to_i > 0
@@ -84,8 +85,15 @@ module Fluent::Plugin
         batchTime = currentTime.utc.iso8601
         eventQueryState = getEventQueryState
         newEventQueryState = []
-        @eventsCount = 0        
-       
+        @eventsCount = 0
+
+        if ExtensionUtils.isAADMSIAuthMode()
+          $log.info("in_kube_events::enumerate: AAD AUTH MSI MODE")
+          if @tag.nil? || !@tag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+            @tag = ExtensionUtils.getOutputStreamId(Constants::KUBE_EVENTS_DATA_TYPE)
+          end
+          $log.info("in_kube_events::enumerate: using kubeevents tag -#{@tag} @ #{Time.now.utc.iso8601}")
+        end
         # Initializing continuation token to nil
         continuationToken = nil
         $log.info("in_kube_events::enumerate : Getting events from Kube API @ #{Time.now.utc.iso8601}")
@@ -131,8 +139,8 @@ module Fluent::Plugin
     end # end enumerate
 
     def parse_and_emit_records(events, eventQueryState, newEventQueryState, batchTime = Time.utc.iso8601)
-      currentTime = Time.now   
-      emitTime = Fluent::Engine.now  
+      currentTime = Time.now
+      emitTime = Fluent::Engine.now
       @@istestvar = ENV["ISTEST"]
       begin
         eventStream = Fluent::MultiEventStream.new
@@ -166,7 +174,7 @@ module Fluent::Plugin
           record["Count"] = items["count"]
           record["Computer"] = nodeName
           record["ClusterName"] = KubernetesApiClient.getClusterName
-          record["ClusterId"] = KubernetesApiClient.getClusterId        
+          record["ClusterId"] = KubernetesApiClient.getClusterId
           eventStream.add(emitTime, record) if record
           @eventsCount += 1
         end

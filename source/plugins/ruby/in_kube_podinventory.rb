@@ -11,7 +11,7 @@ module Fluent::Plugin
 
     @@MDMKubePodInventoryTag = "mdm.kubepodinventory"
     @@hostName = (OMS::Common.get_hostname)
-  
+
 
     def initialize
       super
@@ -27,6 +27,7 @@ module Fluent::Plugin
       require_relative "oms_common"
       require_relative "omslog"
       require_relative "constants"
+      require_relative "extension_utils"
 
       # refer tomlparser-agent-config for updating defaults
       # this configurable via configmap
@@ -39,12 +40,12 @@ module Fluent::Plugin
       @winContainerCount = 0
       @controllerData = {}
       @podInventoryE2EProcessingLatencyMs = 0
-      @podsAPIE2ELatencyMs = 0    
-      
+      @podsAPIE2ELatencyMs = 0
+
       @kubeperfTag = "oneagent.containerInsights.LINUX_PERF_BLOB"
       @kubeservicesTag = "oneagent.containerInsights.KUBE_SERVICES_BLOB"
       @containerInventoryTag = "oneagent.containerInsights.CONTAINER_INVENTORY_BLOB"
-      @insightsMetricsTag = "oneagent.containerInsights.INSIGHTS_METRICS_BLOB" 
+      @insightsMetricsTag = "oneagent.containerInsights.INSIGHTS_METRICS_BLOB"
     end
 
     config_param :run_interval, :time, :default => 60
@@ -55,7 +56,7 @@ module Fluent::Plugin
       @inventoryToMdmConvertor = Inventory2MdmConvertor.new()
     end
 
-    def start      
+    def start
       if @run_interval
         super
         if !ENV["PODS_CHUNK_SIZE"].nil? && !ENV["PODS_CHUNK_SIZE"].empty? && ENV["PODS_CHUNK_SIZE"].to_i > 0
@@ -107,7 +108,30 @@ module Fluent::Plugin
         batchTime = currentTime.utc.iso8601
         serviceRecords = []
         @podInventoryE2EProcessingLatencyMs = 0
-        podInventoryStartTime = (Time.now.to_f * 1000).to_i            
+        podInventoryStartTime = (Time.now.to_f * 1000).to_i
+        if ExtensionUtils.isAADMSIAuthMode()
+           $log.info("in_kube_podinventory::enumerate: AAD AUTH MSI MODE")
+           if @kubeperfTag.nil? || !@kubeperfTag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+             @kubeperfTag = ExtensionUtils.getOutputStreamId(Constants::PERF_DATA_TYPE)
+           end
+           if @kubeservicesTag.nil? || !@kubeservicesTag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+             @kubeservicesTag = ExtensionUtils.getOutputStreamId(Constants::KUBE_SERVICES_DATA_TYPE)
+           end
+           if @containerInventoryTag.nil? || !@containerInventoryTag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+             @containerInventoryTag = ExtensionUtils.getOutputStreamId(Constants::CONTAINER_INVENTORY_DATA_TYPE)
+           end
+           if @insightsMetricsTag.nil? || !@insightsMetricsTag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+             @insightsMetricsTag = ExtensionUtils.getOutputStreamId(Constants::INSIGHTS_METRICS_DATA_TYPE)
+           end
+           if @tag.nil? || !@tag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+             @tag = ExtensionUtils.getOutputStreamId(Constants::KUBE_POD_INVENTORY_DATA_TYPE)
+           end
+	         $log.info("in_kube_podinventory::enumerate: using perf tag -#{@kubeperfTag} @ #{Time.now.utc.iso8601}")
+           $log.info("in_kube_podinventory::enumerate: using kubeservices tag -#{@kubeservicesTag} @ #{Time.now.utc.iso8601}")
+           $log.info("in_kube_podinventory::enumerate: using containerinventory tag -#{@containerInventoryTag} @ #{Time.now.utc.iso8601}")
+           $log.info("in_kube_podinventory::enumerate: using insightsmetrics tag -#{@insightsMetricsTag} @ #{Time.now.utc.iso8601}")
+           $log.info("in_kube_podinventory::enumerate: using kubepodinventory tag -#{@tag} @ #{Time.now.utc.iso8601}")
+        end
 
         # Get services first so that we dont need to make a call for very chunk
         $log.info("in_kube_podinventory::enumerate : Getting services from Kube API @ #{Time.now.utc.iso8601}")
@@ -197,8 +221,8 @@ module Fluent::Plugin
     end
 
     def parse_and_emit_records(podInventory, serviceRecords, continuationToken, batchTime = Time.utc.iso8601)
-      currentTime = Time.now   
-      emitTime = Fluent::Engine.now  
+      currentTime = Time.now
+      emitTime = Fluent::Engine.now
       #batchTime = currentTime.utc.iso8601
       eventStream = Fluent::MultiEventStream.new
       containerInventoryStream = Fluent::MultiEventStream.new
@@ -214,8 +238,8 @@ module Fluent::Plugin
           podInventoryRecords = getPodInventoryRecords(item, serviceRecords, batchTime)
           podInventoryRecords.each do |record|
             if !record.nil?
-              eventStream.add(emitTime, record) if record                                      
-              @inventoryToMdmConvertor.process_pod_inventory_record(record)            
+              eventStream.add(emitTime, record) if record
+              @inventoryToMdmConvertor.process_pod_inventory_record(record)
             end
           end
           # Setting this flag to true so that we can send ContainerInventory records for containers
@@ -232,7 +256,7 @@ module Fluent::Plugin
               # Send container inventory records for containers on windows nodes
               @winContainerCount += containerInventoryRecords.length
               containerInventoryRecords.each do |cirecord|
-                if !cirecord.nil?                
+                if !cirecord.nil?
                   containerInventoryStream.add(emitTime, cirecord) if cirecord
                 end
               end
@@ -255,7 +279,7 @@ module Fluent::Plugin
           containerMetricDataItems.concat(KubernetesApiClient.getContainerResourceRequestsAndLimits(item, "limits", "cpu", "cpuLimitNanoCores", batchTime))
           containerMetricDataItems.concat(KubernetesApiClient.getContainerResourceRequestsAndLimits(item, "limits", "memory", "memoryLimitBytes", batchTime))
 
-          containerMetricDataItems.each do |record|            
+          containerMetricDataItems.each do |record|
             kubePerfEventStream.add(emitTime, record) if record
           end
 
@@ -274,7 +298,7 @@ module Fluent::Plugin
           containerGPUInsightsMetricsDataItems.concat(KubernetesApiClient.getContainerResourceRequestsAndLimitsAsInsightsMetrics(item, "limits", "nvidia.com/gpu", "containerGpuLimits", batchTime))
           containerGPUInsightsMetricsDataItems.concat(KubernetesApiClient.getContainerResourceRequestsAndLimitsAsInsightsMetrics(item, "requests", "amd.com/gpu", "containerGpuRequests", batchTime))
           containerGPUInsightsMetricsDataItems.concat(KubernetesApiClient.getContainerResourceRequestsAndLimitsAsInsightsMetrics(item, "limits", "amd.com/gpu", "containerGpuLimits", batchTime))
-          containerGPUInsightsMetricsDataItems.each do |insightsMetricsRecord|            
+          containerGPUInsightsMetricsDataItems.each do |insightsMetricsRecord|
             insightsMetricsEventStream.add(emitTime, insightsMetricsRecord) if insightsMetricsRecord
           end
 
@@ -341,7 +365,7 @@ module Fluent::Plugin
             if !kubeServiceRecord.nil?
               # adding before emit to reduce memory foot print
               kubeServiceRecord["ClusterId"] = KubernetesApiClient.getClusterId
-              kubeServiceRecord["ClusterName"] = KubernetesApiClient.getClusterName              
+              kubeServiceRecord["ClusterName"] = KubernetesApiClient.getClusterName
               kubeServicesEventStream.add(emitTime, kubeServiceRecord) if kubeServiceRecord
               if @PODS_EMIT_STREAM_BATCH_SIZE > 0 && kubeServicesEventStream.count >= @PODS_EMIT_STREAM_BATCH_SIZE
                 $log.info("in_kube_podinventory::parse_and_emit_records: number of service records emitted #{@PODS_EMIT_STREAM_BATCH_SIZE} @ #{Time.now.utc.iso8601}")
@@ -648,6 +672,6 @@ module Fluent::Plugin
         ApplicationInsightsUtility.sendExceptionTelemetry(errorStr)
       end
       return serviceName
-    end    
+    end
   end # Kube_Pod_Input
 end # module

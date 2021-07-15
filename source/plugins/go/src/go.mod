@@ -23,7 +23,7 @@ require (
 	github.com/philhofer/fwd v1.0.0 // indirect
 	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b // indirect
 	github.com/tinylib/msgp v1.1.2
-	github.com/ugorji/go v1.1.2-0.20180813092308-00b869d2f4a5 // indirect
+	github.com/ugorji/go v1.1.2-0.20180813092308-00b869d2f4a5
 	golang.org/x/net v0.0.0-20200421231249-e086a090c8fd // indirect
 	golang.org/x/time v0.0.0-20161028155119-f51c12702a4d // indirect
 	gopkg.in/inf.v0 v0.9.0 // indirect

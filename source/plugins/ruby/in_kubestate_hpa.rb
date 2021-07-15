@@ -18,7 +18,8 @@ module Fluent::Plugin
       require_relative "oms_common"
       require_relative "omslog"
       require_relative "ApplicationInsightsUtility"
-      require_relative "constants"      
+      require_relative "constants"
+      require_relative "extension_utils"
 
       # refer tomlparser-agent-config for defaults
       # this configurable via configmap
@@ -41,7 +42,7 @@ module Fluent::Plugin
       super
     end
 
-    def start      
+    def start
       if @run_interval
         super
         if !ENV["HPA_CHUNK_SIZE"].nil? && !ENV["HPA_CHUNK_SIZE"].empty? && ENV["HPA_CHUNK_SIZE"].to_i > 0
@@ -78,7 +79,14 @@ module Fluent::Plugin
         batchTime = currentTime.utc.iso8601
 
         @hpaCount = 0
-       
+
+        if ExtensionUtils.isAADMSIAuthMode()
+          $log.info("in_kubestate_hpa::enumerate: AAD AUTH MSI MODE")
+          if @tag.nil? || !@tag.start_with?(Constants::EXTENSION_OUTPUT_STREAM_ID_TAG_PREFIX)
+            @tag = ExtensionUtils.getOutputStreamId(Constants::INSIGHTS_METRICS_DATA_TYPE)
+          end
+	        $log.info("in_kubestate_hpa::enumerate: using tag -#{@tag} @ #{Time.now.utc.iso8601}")
+        end
         # Initializing continuation token to nil
         continuationToken = nil
         $log.info("in_kubestate_hpa::enumerate : Getting HPAs from Kube API @ #{Time.now.utc.iso8601}")
@@ -186,7 +194,7 @@ module Fluent::Plugin
         end
 
         time = Fluent::Engine.now
-        metricItems.each do |insightsMetricsRecord|         
+        metricItems.each do |insightsMetricsRecord|
           insightsMetricsEventStream.add(time, insightsMetricsRecord) if insightsMetricsRecord
         end
 
@@ -231,6 +239,6 @@ module Fluent::Plugin
         @mutex.lock
       end
       @mutex.unlock
-    end    
+    end
   end
 end
